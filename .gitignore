@@ -82,3 +82,14 @@ Thumbs.db
 
 # Test file
 test.txt
+
+# Python
+.venv/
+.venv-training/
+__pycache__/
+*.pyc
+
+# Training artifacts
+training/models/*.onnx
+training/checkpoints/
+training/results/

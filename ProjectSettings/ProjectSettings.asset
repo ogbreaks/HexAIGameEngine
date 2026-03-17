@@ -4,7 +4,7 @@
 PlayerSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 28
-  productGUID: f7f3ea5089dd5f94abbb5b1e86cf8840
+  productGUID: b6c1cc8c05830be42843b0c1473f61d4
   AndroidProfiler: 0
   AndroidFilterTouchesWhenObscured: 0
   AndroidEnableSustainedPerformanceMode: 0
@@ -13,7 +13,7 @@ PlayerSettings:
   useOnDemandResources: 0
   accelerometerFrequency: 60
   companyName: DefaultCompany
-  productName: HexAIGame
+  productName: Hex AI
   defaultCursor: {fileID: 0}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
@@ -584,7 +584,8 @@ PlayerSettings:
   webGLCloseOnQuit: 0
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
-  scriptingDefineSymbols: {}
+  scriptingDefineSymbols:
+    Standalone: APP_UI_EDITOR_ONLY
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:
@@ -605,14 +606,14 @@ PlayerSettings:
   editorAssembliesCompatibilityLevel: 1
   m_RenderingPath: 1
   m_MobileRenderingPath: 1
-  metroPackageName: HexAIGame
+  metroPackageName: Hex AI
   metroPackageVersion: 
   metroCertificatePath: 
   metroCertificatePassword: 
   metroCertificateSubject: 
   metroCertificateIssuer: 
   metroCertificateNotAfter: 0000000000000000
-  metroApplicationDescription: HexAIGame
+  metroApplicationDescription: Hex AI
   wsaImages: {}
   metroTileShortName: 
   metroTileShowName: 0
@@ -683,10 +684,10 @@ PlayerSettings:
   captureStartupLogs: {}
   activeInputHandler: 1
   windowsGamepadBackendHint: 0
-  cloudProjectId: 1d464cee-68e9-4c0d-9f06-7f7b773b8b7f
+  cloudProjectId: b3687564-0db7-4d17-bc5f-fd1169f3e1d4
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames: []
-  projectName: HexAIGame
+  projectName: Hex AI 2026-03-15_22-34-05
   organizationId: thepixelpunk
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 0
