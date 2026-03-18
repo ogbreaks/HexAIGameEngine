@@ -13,9 +13,9 @@ using Unity.InferenceEngine;
 /// Assign ONNX ModelAssets in the Inspector, then call LoadModel() once to
 /// activate a difficulty level before the game starts.
 ///
-/// Network I/O contract (matches ML-Agents PPO export):
-///   Input  "obs_0"             — shape [1, 122]  (state vector)
-///   Output "discrete_actions"  — shape [1, 121]  (action logits / log-probs)
+/// Network I/O contract (matches hex_export.py PPO export):
+///   Input  "obs_0"        — shape [1, 122]  (state vector)
+///   Output "action_probs" — shape [1, 121]  (action logits)
 ///
 /// If the output layer name differs from your export, set OutputLayerName in
 /// the Inspector to match.
@@ -30,9 +30,9 @@ public class AIManager : MonoBehaviour
     public ModelAsset expertModel;
 
     [Header("Inference settings")]
-    [Tooltip("Output layer name exported by mlagents-learn. " +
-             "Typical value: 'discrete_actions'. Check with Netron if unsure.")]
-    public string outputLayerName = "discrete_actions";
+    [Tooltip("Output layer name from hex_export.py. " +
+             "Default: 'action_probs'. Verify with Netron if unsure.")]
+    public string outputLayerName = "action_probs";
 
     // ── Private state ──────────────────────────────────────────────────────
     private Worker _worker;

@@ -37,8 +37,6 @@ public class HexBoard : MonoBehaviour
     private bool            gameOver     = false;
     private HexCell         hoveredCell;
 
-    // ── Training agents (self-play) ────────────────────────────────────────
-    private readonly List<HexAgent> _trainingAgents = new List<HexAgent>();
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -214,83 +212,10 @@ public class HexBoard : MonoBehaviour
             }));
     }
 
-    // ── Training support (used by HexAgent) ───────────────────────────────
+    // ── Training support ──────────────────────────────────────────────────
 
-    /// <summary>Returns the most recent game state (read-only for agents).</summary>
+    /// <summary>Returns the most recent game state (read-only).</summary>
     public GameStateData GetCurrentState() => currentState;
-
-    /// <summary>
-    /// Register a HexAgent for self-play.  Once both agents are registered
-    /// they are cross-linked as opponents.
-    /// </summary>
-    public void RegisterAgent(HexAgent agent)
-    {
-        if (_trainingAgents.Contains(agent)) return;
-        _trainingAgents.Add(agent);
-
-        if (_trainingAgents.Count == 2)
-        {
-            _trainingAgents[0].SetOpponent(_trainingAgents[1]);
-            _trainingAgents[1].SetOpponent(_trainingAgents[0]);
-        }
-    }
-
-    /// <summary>
-    /// Synchronous HTTP reset used by HexAgent.OnEpisodeBegin during training.
-    /// Uses System.Net.WebClient so there is no coroutine overhead per episode.
-    /// </summary>
-    public void ResetForTraining()
-    {
-        gameOver = false;
-        foreach (var cell in cells)
-        {
-            if (cell == null) continue;
-            cell.SetState(HexCell.CellState.Empty);
-            cell.SetHighlight(false);
-        }
-
-        try
-        {
-#pragma warning disable SYSLIB0014 // WebClient is legacy but fine for training
-            using var wc = new System.Net.WebClient();
-            wc.Headers[System.Net.HttpRequestHeader.ContentType] = "application/json";
-            string json = wc.UploadString("http://localhost:5000/reset", "");
-            currentState = JsonUtility.FromJson<GameStateData>(json);
-            RenderState(currentState);
-#pragma warning restore SYSLIB0014
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"[HexBoard] ResetForTraining failed: {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Apply a state update received by a HexAgent after posting a training move.
-    /// Skips the full ApplyState path to avoid re-enabling input during training.
-    /// </summary>
-    public void ApplyStateFromTraining(GameStateData state)
-    {
-        currentState = state;
-        RenderState(state);
-    }
-
-    /// <summary>
-    /// Call RequestDecision() on the agent whose playerIndex matches the
-    /// current-player in the shared game state.
-    /// </summary>
-    public void RequestNextAgentDecision()
-    {
-        if (currentState == null) return;
-        foreach (var agent in _trainingAgents)
-        {
-            if (agent.playerIndex == currentState.current_player)
-            {
-                agent.PromptTurn();
-                return;
-            }
-        }
-    }
 
     // ── Private helpers ───────────────────────────────────────────────────
 
