@@ -22,7 +22,15 @@ public class DifficultySelector : MonoBehaviour
     public Button mediumButton;
     public Button hardButton;
     public Button expertButton;
-
+    // ── Simulation counts per difficulty ─────────────────────────────────────
+    private static int MctsSimulations(AIManager.Difficulty d) => d switch
+    {
+        AIManager.Difficulty.Easy   =>    8,
+        AIManager.Difficulty.Medium =>  100,
+        AIManager.Difficulty.Hard   =>  400,
+        AIManager.Difficulty.Expert => 1000,
+        _                           =>  100,
+    };
     // ── Colour palette ─────────────────────────────────────────────────────
     private static readonly Color SelectedColor   = new Color(0.22f, 0.55f, 0.88f, 1f);
     private static readonly Color UnselectedColor = new Color(0.22f, 0.22f, 0.28f, 0.90f);
@@ -52,6 +60,7 @@ public class DifficultySelector : MonoBehaviour
     private void Select(AIManager.Difficulty difficulty)
     {
         aiManager?.LoadModel(difficulty);
+        hexBoard?.SetMctsSimulations(MctsSimulations(difficulty));
         HighlightSelected(difficulty);
         uiManager?.ShowDifficulty(difficulty.ToString());
 

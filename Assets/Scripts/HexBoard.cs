@@ -27,6 +27,9 @@ public class HexBoard : MonoBehaviour
     /// <summary>When true the human plays as Player 1 (Red); AI is Player 2 (Blue).</summary>
     public bool humanIsPlayer1 = true;
 
+    /// <summary>Number of MCTS simulations per AI move. Set by DifficultySelector.</summary>
+    private int _mctsSimulations = 100;
+
     // ── Constants ─────────────────────────────────────────────────────────
     private const int GridSize = 11;
 
@@ -181,7 +184,7 @@ public class HexBoard : MonoBehaviour
         // Brief pause so the human can see the board update before the AI moves.
         yield return new WaitForSeconds(0.5f);
 
-        if (aiManager == null || gameOver)
+        if (gameOver)
         {
             inputHandler.inputEnabled = true;
             yield break;
@@ -194,7 +197,30 @@ public class HexBoard : MonoBehaviour
             yield break;
         }
 
-        int action = aiManager.GetBestAction(state.state_vector, legal);
+        // ── Try MCTS via server ──────────────────────────────────────────────────
+        int action = -1;
+        Debug.Log($"[MCTS] Attempting MCTS move with {_mctsSimulations} simulations");
+        yield return StartCoroutine(hexClient.PostMctsMove(
+            _mctsSimulations,
+            a =>
+            {
+                action = a;
+                Debug.Log($"[MCTS] MCTS returned action {a}");
+            },
+            err =>
+            {
+                Debug.LogWarning($"[MCTS] MCTS failed, falling back: {err}");
+            }
+        ));
+
+        // ── Fallback to local AIManager when the server is unavailable ────────
+        if (action < 0)
+        {
+            if (aiManager != null)
+                action = aiManager.GetBestAction(state.state_vector, legal);
+            else
+                action = legal[UnityEngine.Random.Range(0, legal.Count)];
+        }
 
         StartCoroutine(hexClient.PostMove(action,
             nextState =>
@@ -216,6 +242,12 @@ public class HexBoard : MonoBehaviour
 
     /// <summary>Returns the most recent game state (read-only).</summary>
     public GameStateData GetCurrentState() => currentState;
+
+    /// <summary>
+    /// Set the number of MCTS simulations used for AI turns.
+    /// Called by DifficultySelector when the player picks a difficulty.
+    /// </summary>
+    public void SetMctsSimulations(int simulations) => _mctsSimulations = simulations;
 
     // ── Private helpers ───────────────────────────────────────────────────
 

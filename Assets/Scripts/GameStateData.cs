@@ -25,3 +25,17 @@ public class ErrorResponse
     public string error;
     public int[]  legal_actions;
 }
+
+[System.Serializable]
+public class MctsRequest
+{
+    public int simulations;
+}
+
+[System.Serializable]
+public class MctsResponse
+{
+    public int   action;
+    public float time_ms;
+    // visits is a string-keyed dict — not supported by JsonUtility, so omitted
+}

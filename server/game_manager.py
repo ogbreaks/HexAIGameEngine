@@ -58,6 +58,44 @@ class GameManager:
         self.game = HexGame()
         return self._build_state_dict()
 
+    def get_mcts_action(self, mcts, simulations: int | None = None) -> dict:
+        """
+        Run MCTS on the current game state and return the recommended move.
+
+        The game state is *not* modified — the caller must issue a separate
+        ``apply_move`` call to actually play the action.
+
+        Parameters
+        ----------
+        mcts : training.hex_mcts.MCTS
+            A ready-to-use MCTS instance backed by the policy network.
+        simulations : int | None
+            Number of simulations to run.  Uses the MCTS default if None.
+
+        Returns
+        -------
+        dict with keys:
+            action   : int         — suggested row-major cell index
+            visits   : dict        — {str(action): visit_count} for all root children
+            time_ms  : float       — wall-clock time spent (ms)
+
+        Raises
+        ------
+        ValueError
+            If the current game is already terminal.
+        """
+        if self.game.is_terminal():
+            raise ValueError("Cannot request MCTS move: game is already terminal.")
+
+        # HexGame is immutable; holding a reference is safe without copying.
+        game_snapshot = self.game
+        action, visits, time_ms = mcts.get_action_with_stats(game_snapshot, simulations)
+        return {
+            "action": action,
+            "visits": {str(k): v for k, v in visits.items()},
+            "time_ms": round(time_ms, 2),
+        }
+
     # ── Internal ────────────────────────────────────────────────────────────
 
     def _build_state_dict(self) -> dict:

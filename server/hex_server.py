@@ -3,17 +3,26 @@ hex_server.py — lightweight HTTP server (stdlib only, no Flask/FastAPI).
 
 Endpoints
 ---------
-GET  /state   — current game state
-POST /move    — apply a move  { "action": N }
-POST /reset   — start a new game
+GET  /state      — current game state
+POST /move       — apply a move            { "action": N }
+POST /reset      — start a new game
+POST /mcts_move  — MCTS-suggested move     { "simulations": N }  (N is optional)
 
 All responses are JSON with Content-Type: application/json.
 CORS headers are included so Unity WebGL / UnityWebRequest can call freely.
+
+MCTS model loading
+------------------
+The server loads a PPO model once at startup.  The path defaults to
+``training/models/hex_easy.zip`` and can be overridden via the MODEL_PATH
+environment variable.  If the model file is missing the /mcts_move endpoint
+returns 503; all other endpoints remain fully functional.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -29,6 +38,37 @@ from server.game_manager import GameManager
 
 HOST = "localhost"
 PORT = 5000
+
+# ── MCTS model (loaded once at startup) ─────────────────────────────────────
+
+_MODEL_PATH: str = os.environ.get(
+    "MODEL_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "training", "models", "hex_easy.zip"),
+)
+
+_mcts = None  # type: ignore[assignment]
+
+try:
+    import os as _os  # noqa: F811
+    from stable_baselines3 import PPO as _PPO
+    from training.hex_train import HexCNNExtractor as _HexCNNExtractor
+    from training.hex_mcts import MCTS as _MCTS
+
+    _model_path_resolved = os.path.abspath(_MODEL_PATH)
+    if os.path.isfile(_model_path_resolved):
+        _ppo_model = _PPO.load(
+            _model_path_resolved,
+            custom_objects={"features_extractor_class": _HexCNNExtractor},
+        )
+        _ppo_model.policy.set_training_mode(False)
+        _mcts = _MCTS(_ppo_model)
+        print(f"[MCTS] Model loaded from {_model_path_resolved}")
+    else:
+        print(
+            f"[MCTS] Model not found at {_model_path_resolved} — /mcts_move disabled."
+        )
+except Exception as _e:
+    print(f"[MCTS] Failed to load model: {_e} — /mcts_move disabled.")
 
 # Module-level game manager shared across all requests.
 # _manager_lock guards all reads and writes from handler threads.
@@ -64,6 +104,7 @@ class HexRequestHandler(BaseHTTPRequestHandler):
             self._send_response(404, {"error": f"Unknown endpoint: {self.path}"})
 
     def do_POST(self) -> None:  # noqa: N802
+        print(f"[SERVER] POST {self.path}")
         body = self._read_body()
 
         if self.path == "/move":
@@ -72,10 +113,63 @@ class HexRequestHandler(BaseHTTPRequestHandler):
             with _manager_lock:
                 result = _manager.reset()
             self._send_response(200, result)
+        elif self.path == "/mcts_move":
+            self._handle_mcts_move(body)
         else:
             self._send_response(404, {"error": f"Unknown endpoint: {self.path}"})
 
     # ── Handlers ─────────────────────────────────────────────────────────────
+
+    def _handle_mcts_move(self, body: dict) -> None:
+        if _mcts is None:
+            self._send_response(
+                503,
+                {
+                    "error": "MCTS model is not loaded. Set MODEL_PATH and restart the server."
+                },
+            )
+            return
+
+        simulations = body.get("simulations", None)
+        if simulations is not None and not isinstance(simulations, int):
+            self._send_response(
+                400,
+                {"error": "'simulations' must be an integer."},
+            )
+            return
+
+        # Snapshot the immutable HexGame reference under lock, then run MCTS
+        # outside the lock so other requests are not blocked during search.
+        with _manager_lock:
+            game_snapshot = _manager.game
+
+        if game_snapshot.is_terminal():
+            self._send_response(
+                400,
+                {"error": "Game is already terminal; no move available."},
+            )
+            return
+
+        try:
+            from training.hex_mcts import (
+                MCTS,
+            )  # noqa: F401 — already imported at startup
+
+            action, visits, time_ms = _mcts.get_action_with_stats(
+                game_snapshot, simulations
+            )
+        except Exception as exc:
+            self._send_response(500, {"error": f"MCTS error: {exc}"})
+            return
+
+        self._send_response(
+            200,
+            {
+                "action": action,
+                "visits": {str(k): v for k, v in visits.items()},
+                "time_ms": round(time_ms, 2),
+            },
+        )
 
     def _handle_move(self, body: dict) -> None:
         if "action" not in body:
@@ -144,9 +238,11 @@ def run_server(host: str = HOST, port: int = PORT) -> None:
     """Start the server and block until interrupted."""
     server = make_server(host, port)
     print(f"Hex AI server running on {host}:{port}")
-    print(f"GET  /state  — get current game state")
-    print(f"POST /move   — apply move {{action: N}}")
-    print(f"POST /reset  — reset game")
+    print(f"GET  /state      — get current game state")
+    print(f"POST /move       — apply move {{action: N}}")
+    print(f"POST /reset      — reset game")
+    print(f"POST /mcts_move  — MCTS move {{simulations: N}} (N optional)")
+    print(f"MCTS model: {'loaded' if _mcts is not None else 'NOT LOADED'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

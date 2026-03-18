@@ -97,4 +97,44 @@ public class HexClient : MonoBehaviour
         req.Dispose();
         onSuccess?.Invoke(data);
     }
+
+    // ── POST /mcts_move ─────────────────────────────────────────────────────
+    /// <summary>
+    /// Request an MCTS-suggested action from the Python server.
+    /// Calls <paramref name="onSuccess"/> with the action index on HTTP 200,
+    /// or <paramref name="onError"/> on any network or server error.
+    /// </summary>
+    public IEnumerator PostMctsMove(
+        int                   simulations,
+        System.Action<int>    onSuccess,
+        System.Action<string> onError)
+    {
+        var body = JsonUtility.ToJson(new MctsRequest { simulations = simulations });
+        var req  = new UnityWebRequest($"{BASE_URL}/mcts_move", "POST");
+        req.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
+        req.downloadHandler = new DownloadHandlerBuffer();
+        req.SetRequestHeader("Content-Type", "application/json");
+
+        yield return req.SendWebRequest();
+
+        if (req.result != UnityWebRequest.Result.Success)
+        {
+            var msg = req.error;
+            req.Dispose();
+            onError?.Invoke(msg);
+            yield break;
+        }
+
+        if (req.responseCode != 200)
+        {
+            var err = JsonUtility.FromJson<ErrorResponse>(req.downloadHandler.text);
+            req.Dispose();
+            onError?.Invoke(err?.error ?? $"Server error {req.responseCode}");
+            yield break;
+        }
+
+        var data = JsonUtility.FromJson<MctsResponse>(req.downloadHandler.text);
+        req.Dispose();
+        onSuccess?.Invoke(data.action);
+    }
 }

@@ -11,7 +11,7 @@ Usage
 
 Difficulty levels
 -----------------
-  All levels use the same CNN architecture (3×conv64 + BN + dense[256,128]).
+  All levels use the same CNN architecture (stem conv64 + 6×ResidualBlock + GAP + dense[256,128]).
   Only step counts and self-play swap frequency differ.
 
   easy   : 1 500 000 steps  swap every  75 000
@@ -52,10 +52,31 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.vec_env import DummyVecEnv
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from training.hex_env import HexEnv
 
-# ── CNN feature extractor ─────────────────────────────────────────────────
+# ── Residual block ────────────────────────────────────────────────────────
+
+
+class ResidualBlock(nn.Module):
+    """Two-layer residual block with batch normalisation."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn1 = nn.BatchNorm2d(channels)
+        self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
+        self.bn2 = nn.BatchNorm2d(channels)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = self.bn2(self.conv2(x))
+        return F.relu(x + residual)
+
+
+# ── Residual CNN feature extractor ───────────────────────────────────────
 
 
 class HexCNNExtractor(BaseFeaturesExtractor):
@@ -68,36 +89,30 @@ class HexCNNExtractor(BaseFeaturesExtractor):
 
     Architecture:
       board  → reshape [batch, 1, 11, 11]
-               → Conv2d(1→64, 3×3, pad=1) → BN → ReLU
-               → Conv2d(64→64, 3×3, pad=1) → BN → ReLU
-               → Conv2d(64→64, 3×3, pad=1) → BN → ReLU
-               → Flatten  [batch, 64*11*11 = 7744]
+               → Conv2d(1→64, 3×3, pad=1) → BN → ReLU   (stem)
+               → 6 × ResidualBlock(64)
+               → Global average pooling → [batch, 64]
       player → [batch, 1]
-      concat → [batch, 7745]
-               → Linear(7745→256) → ReLU
+      concat → [batch, 65]
+               → Linear(65→256) → ReLU
                → Linear(256→features_dim)
     """
 
     def __init__(self, observation_space, features_dim: int = 128):
         super().__init__(observation_space, features_dim)
 
-        self.conv = nn.Sequential(
+        self.stem = nn.Sequential(
             nn.Conv2d(1, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Flatten(),  # [batch, 64*11*11]
         )
 
-        conv_out = 64 * 11 * 11  # 7744
+        self.res_blocks = nn.Sequential(*[ResidualBlock(64) for _ in range(6)])
+
+        self.gap = nn.AdaptiveAvgPool2d(1)  # global average pooling → [B, 64, 1, 1]
 
         self.head = nn.Sequential(
-            nn.Linear(conv_out + 1, 256),
+            nn.Linear(64 + 1, 256),
             nn.ReLU(),
             nn.Linear(256, features_dim),
         )
@@ -105,8 +120,10 @@ class HexCNNExtractor(BaseFeaturesExtractor):
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
         board = obs[:, :121].view(-1, 1, 11, 11)  # [B, 1, 11, 11]
         player = obs[:, 121:122]  # [B, 1]
-        conv_out = self.conv(board)  # [B, 7744]
-        combined = torch.cat([conv_out, player], dim=1)  # [B, 7745]
+        x = self.stem(board)  # [B, 64, 11, 11]
+        x = self.res_blocks(x)  # [B, 64, 11, 11]
+        x = self.gap(x).flatten(1)  # [B, 64]
+        combined = torch.cat([x, player], dim=1)  # [B, 65]
         return self.head(combined)  # [B, features_dim]
 
 
