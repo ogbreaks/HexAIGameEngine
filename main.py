@@ -7,6 +7,10 @@ Usage
   python main.py --mode random_vs_random
   python main.py --mode random_vs_random --games 1000
   python main.py --mode server
+  python main.py --mode train_az
+  python main.py --mode train_az --config config/hex11_default.yaml
+  python main.py --mode train_az --config config/hex11_default.yaml --resume training/checkpoints/hex_az_100.pth
+  python main.py --mode export_az --model training/models/hex_az_best.pth --output training/models/hex_az_best.onnx
 """
 
 from __future__ import annotations
@@ -76,6 +80,45 @@ def play_random_vs_random(num_games: int) -> None:
     print(f"Errors          : {errors}")
 
 
+def train_az(config_path: str, resume_path: str | None = None) -> None:
+    """Launch AlphaZero training with the given config."""
+    import yaml  # type: ignore[import]
+    from training.coach import Coach
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    if resume_path:
+        print(f"[AZ] Resuming from checkpoint: {resume_path}")
+        coach, start_iteration = Coach.load_checkpoint(resume_path, config)
+    else:
+        coach = Coach(config)
+        start_iteration = 0
+
+    coach.train(start_iteration=start_iteration)
+
+
+def export_az(
+    model_path: str, output_path: str, config_path: str | None = None
+) -> None:
+    """Export a trained AZ network to ONNX."""
+    import torch
+    from training.policy_value_network import PolicyValueNetwork
+    from training.export import export_onnx
+
+    config: dict = {}
+    if config_path:
+        import yaml  # type: ignore[import]
+
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+
+    network = PolicyValueNetwork(config)
+    network.load_state_dict(torch.load(model_path, map_location="cpu"))
+    network.eval()
+    export_onnx(network, output_path)
+
+
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 
@@ -83,15 +126,41 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Hex game CLI")
     parser.add_argument(
         "--mode",
-        choices=["human_vs_human", "random_vs_random", "server"],
+        choices=[
+            "human_vs_human",
+            "random_vs_random",
+            "server",
+            "train_az",
+            "export_az",
+        ],
         required=True,
-        help="Game mode",
+        help="Mode to run",
     )
     parser.add_argument(
         "--games",
         type=int,
         default=1000,
         help="Number of games for random_vs_random (default: 1000)",
+    )
+    parser.add_argument(
+        "--config",
+        default="config/hex11_default.yaml",
+        help="Path to YAML config for train_az (default: config/hex11_default.yaml)",
+    )
+    parser.add_argument(
+        "--resume",
+        default=None,
+        help="Path to checkpoint .pth to resume AZ training from",
+    )
+    parser.add_argument(
+        "--model",
+        default="training/models/hex_az_best.pth",
+        help="Path to model weights for export_az",
+    )
+    parser.add_argument(
+        "--output",
+        default="training/models/hex_az_best.onnx",
+        help="Output ONNX path for export_az",
     )
     args = parser.parse_args()
 
@@ -101,6 +170,10 @@ def main() -> None:
         play_random_vs_random(args.games)
     elif args.mode == "server":
         run_server()
+    elif args.mode == "train_az":
+        train_az(args.config, resume_path=args.resume)
+    elif args.mode == "export_az":
+        export_az(args.model, args.output, config_path=args.config)
 
 
 if __name__ == "__main__":

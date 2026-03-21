@@ -1,0 +1,14 @@
+.venv
+.venv-training
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+training/checkpoints
+training/models
+training/results
+training/metrics.json
+training/cost_state.json
+docker-compose.yml
+*.md

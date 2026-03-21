@@ -1,0 +1,57 @@
+# hex11_cloud.yaml — Scaled AlphaZero config for cloud compute (GCP / multi-GPU)
+# Designed for serious training runs with access to powerful hardware.
+# Expect ~10–50x more compute vs hex11_default.yaml.
+
+# ── Network ──────────────────────────────────────────────────────────────────
+# Scaled to match AlphaZero-class capacity for 11×11 Hex.
+# 20 blocks × 256 channels ≈ 50M params (vs 10×128 ≈ 10M in default).
+trunk: resnet
+num_res_blocks: 20         # doubled from 10 — deeper feature extraction
+num_channels: 256          # doubled from 128 — wider representations
+
+# ViT-only settings (ignored when trunk=resnet)
+vit_heads: 16
+vit_layers: 12
+vit_ff_dim: 1024
+vit_dropout: 0.1
+
+# ── MCTS ─────────────────────────────────────────────────────────────────────
+num_simulations: 1600      # doubled from 800 — stronger self-play policy
+c_puct: 1.4
+dirichlet_alpha: 0.15      # lowered: less random noise for larger search trees
+dirichlet_weight: 0.25
+temperature_threshold: 30
+
+# ── Self-play ─────────────────────────────────────────────────────────────────
+num_workers: 16             # 4x — scale to available CPU cores
+games_per_worker: 50        # doubled — 800 total games/iteration (8x default)
+
+# ── GPU Inference Server ─────────────────────────────────────────────────────
+# Workers send evaluation requests to a GPU inference server instead of
+# running inference on CPU. Dramatically faster than CPU-only workers.
+use_inference_server: true
+inference_batch_size: 64    # batch pending MCTS evals for GPU throughput
+inference_max_wait_ms: 5    # max ms to wait for batch to fill before flushing
+
+# ── Training ─────────────────────────────────────────────────────────────────
+num_iterations: 5000        # 5x — longer training for stronger convergence
+train_steps_per_iter: 400   # 4x — more gradient steps per iteration
+batch_size: 1024            # doubled batch for larger network + GPU memory
+lr_init: 0.002              # slightly higher for larger batch (linear scaling rule)
+weight_decay: 0.0001        # L2 regularisation — helps at scale
+min_buffer_size: 50000      # 5x — wait for diverse data before training starts
+buffer_size: 2000000        # 4x — retain more training history (2M positions)
+
+# ── Arena ─────────────────────────────────────────────────────────────────────
+arena_freq: 25               # less frequent — each iteration produces more data
+arena_games: 80              # doubled — more reliable win-rate signal
+arena_simulations: 400       # doubled — fairer evaluation with stronger search
+promotion_threshold: 0.55
+
+# ── Checkpointing ────────────────────────────────────────────────────────────
+checkpoint_freq: 100
+model_dir: training/models
+checkpoint_dir: training/checkpoints
+
+# ── Metadata ─────────────────────────────────────────────────────────────────
+level: az_cloud

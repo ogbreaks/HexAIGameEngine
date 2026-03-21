@@ -1,0 +1,46 @@
+# hex11_default.yaml — AlphaZero 11×11 Hex hyperparameters
+# All values can be overridden via CLI or environment variables.
+
+# ── Network ──────────────────────────────────────────────────────────────────
+trunk: resnet           # resnet | vit
+num_res_blocks: 10      # ResNet only — residual blocks in tower
+num_channels: 128       # channels throughout trunk + head inputs
+
+# ViT-only settings (ignored when trunk=resnet)
+vit_heads: 8
+vit_layers: 6
+vit_ff_dim: 512
+vit_dropout: 0.1
+
+# ── MCTS ─────────────────────────────────────────────────────────────────────
+num_simulations: 800    # simulations per move during self-play
+c_puct: 1.4             # PUCT exploration constant
+dirichlet_alpha: 0.3    # Dirichlet noise concentration (root, self-play)
+dirichlet_weight: 0.25  # weight of Dirichlet noise at root
+temperature_threshold: 30  # moves before temperature drops from 1.0 to 0.01
+
+# ── Self-play ─────────────────────────────────────────────────────────────────
+num_workers: 4          # parallel CPU processes for self-play
+games_per_worker: 25    # games per worker per iteration (100 total per iteration)
+
+# ── Training ─────────────────────────────────────────────────────────────────
+num_iterations: 1000    # total training iterations (self-play + train cycles)
+train_steps_per_iter: 100  # gradient updates per iteration
+batch_size: 512
+lr_init: 0.001          # Adam initial learning rate (cosine decay to 0)
+min_buffer_size: 10000  # minimum replay buffer entries before training starts
+buffer_size: 500000     # maximum replay buffer capacity (FIFO eviction)
+
+# ── Arena ─────────────────────────────────────────────────────────────────────
+arena_freq: 10                # evaluate every N iterations
+arena_games: 40               # games per evaluation (split 50/50 first-mover)
+arena_simulations: 200        # MCTS simulations during arena (lower than self-play)
+promotion_threshold: 0.55     # win rate required to promote challenger to best
+
+# ── Checkpointing ────────────────────────────────────────────────────────────
+checkpoint_freq: 50                       # save full checkpoint every N iterations
+model_dir: training/models                # best weights + ONNX exports
+checkpoint_dir: training/checkpoints      # full checkpoints (resume training)
+
+# ── Metadata ─────────────────────────────────────────────────────────────────
+level: az               # written to metrics.json for dashboard display

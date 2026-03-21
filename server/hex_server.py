@@ -43,26 +43,25 @@ PORT = 5000
 
 _MODEL_PATH: str = os.environ.get(
     "MODEL_PATH",
-    os.path.join(os.path.dirname(__file__), "..", "training", "models", "hex_easy.zip"),
+    os.path.join(
+        os.path.dirname(__file__), "..", "training", "models", "hex_az_best.pth"
+    ),
 )
 
 _mcts = None  # type: ignore[assignment]
 
 try:
-    import os as _os  # noqa: F811
-    from stable_baselines3 import PPO as _PPO
-    from training.hex_train import HexCNNExtractor as _HexCNNExtractor
-    from training.hex_mcts import MCTS as _MCTS
+    import torch as _torch
+    from training.policy_value_network import PolicyValueNetwork as _PolicyValueNetwork
+    from training.mcts import MCTS as _MCTS
 
     _model_path_resolved = os.path.abspath(_MODEL_PATH)
     if os.path.isfile(_model_path_resolved):
-        _ppo_model = _PPO.load(
-            _model_path_resolved,
-            custom_objects={"features_extractor_class": _HexCNNExtractor},
-        )
-        _ppo_model.policy.set_training_mode(False)
-        _mcts = _MCTS(_ppo_model)
-        print(f"[MCTS] Model loaded from {_model_path_resolved}")
+        _network = _PolicyValueNetwork()  # defaults match trained model
+        _network.load_state_dict(_torch.load(_model_path_resolved, map_location="cpu"))
+        _network.eval()
+        _mcts = _MCTS(_network)
+        print(f"[MCTS] AZ model loaded from {_model_path_resolved}")
     else:
         print(
             f"[MCTS] Model not found at {_model_path_resolved} — /mcts_move disabled."

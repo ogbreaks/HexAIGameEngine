@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  hexai-training:
+    build: .
+    ports:
+      - "8080:8080"
+      - "5000:5000"
+    environment:
+      - HOURLY_RATE=0.0
+      - TIMEZONE_OFFSET=0
+      - TRAINING_CONFIG=config/hex11_test.yaml
+    volumes:
+      - ./training/models:/app/training/models
+      - ./training/checkpoints:/app/training/checkpoints

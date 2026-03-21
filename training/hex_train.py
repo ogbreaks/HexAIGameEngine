@@ -36,10 +36,12 @@ Outputs
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
-from datetime import datetime
+import time
+from datetime import datetime, timezone, timedelta
 
 # Allow imports from the project root (game/) when called from any cwd.
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -162,14 +164,66 @@ class SelfPlayCallback(BaseCallback):
     opponent model so the agent trains against progressively stronger play.
     """
 
-    def __init__(self, env: HexEnv, checkpoint_dir: str, swap_freq: int = 100_000):
+    def __init__(
+        self,
+        env: HexEnv,
+        checkpoint_dir: str,
+        swap_freq: int = 100_000,
+        total_steps: int = 0,
+        level: str = "hard",
+    ):
         super().__init__()
         self._hex_env = env
         self._checkpoint_dir = checkpoint_dir
         self._swap_freq = swap_freq
         self._last_swap = 0
+        self._total_steps: int = total_steps
+        self._level: str = level
+        self._start_time: float | None = None
+        self._start_steps: int = 0
+        self._last_fps: int = 0
+        self._upgrade_count: int = 0
+        self._recent_outcomes: list[int] = []
+        self._WIN_WINDOW: int = 200
+        self._last_metrics_write: int = 0
+        self._metrics_path: str = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "metrics.json"
+        )
+        self._cost_state_path: str = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "cost_state.json"
+        )
+        self._hourly_rate: float = float(os.environ.get("HOURLY_RATE", "0.0"))
+        self._tz_offset: int = int(os.environ.get("TIMEZONE_OFFSET", "0"))
+        self._prior_session_hours: float = self._load_prior_hours()
+
+    def _load_prior_hours(self) -> float:
+        if os.path.exists(self._cost_state_path):
+            try:
+                with open(self._cost_state_path) as f:
+                    return json.load(f).get("total_hours", 0.0)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return 0.0
+
+    def _save_total_hours(self, total_hours: float) -> None:
+        with open(self._cost_state_path, "w") as f:
+            json.dump({"total_hours": total_hours}, f)
+
+    def _on_training_start(self) -> None:
+        super()._on_training_start()
+        self._start_time = time.time()
+        self._start_steps = self.num_timesteps
 
     def _on_step(self) -> bool:
+        # Track rolling win rate from episode terminations
+        dones = self.locals.get("dones", [])
+        rewards = self.locals.get("rewards", [])
+        for done, reward in zip(dones, rewards):
+            if done:
+                self._recent_outcomes.append(1 if reward > 0 else 0)
+                if len(self._recent_outcomes) > self._WIN_WINDOW:
+                    self._recent_outcomes.pop(0)
+
         if self.num_timesteps - self._last_swap >= self._swap_freq:
             self._last_swap = self.num_timesteps
             # Find the checkpoint with the highest step count
@@ -178,13 +232,121 @@ class SelfPlayCallback(BaseCallback):
                 try:
                     opponent = PPO.load(latest)
                     self._hex_env.set_opponent_model(opponent)
+                    self._upgrade_count += 1
                     print(
                         f"\n[SelfPlay] step={self.num_timesteps:,} — "
                         f"opponent upgraded → {os.path.basename(latest)}"
                     )
                 except Exception as e:
                     self.logger.warn(f"[SelfPlay] Could not load checkpoint: {e}")
+
+        # Write metrics every ~2048 steps using counter pattern (avoids modulo edge cases on resume)
+        if self.num_timesteps - self._last_metrics_write >= 2048:
+            self._last_metrics_write = self.num_timesteps
+            self._write_metrics()
+
         return True
+
+    def _write_metrics(self) -> None:
+        if self._start_time is None:
+            return
+
+        now = time.time()
+        steps = self.num_timesteps
+        total = (
+            self._total_steps
+        )  # use constructor arg — model._total_timesteps is only remaining steps
+
+        # Progress
+        percent = round(steps / total * 100, 2) if total > 0 else 0.0
+
+        # Speed — derive fps from actual wall time this session, fall back to last known good
+        elapsed_session = now - self._start_time
+        steps_this_session = self.num_timesteps - self._start_steps
+        if elapsed_session > 5 and steps_this_session > 0:
+            fps = int(steps_this_session / elapsed_session)
+            self._last_fps = fps
+        else:
+            fps = self._last_fps
+
+        remaining_steps = total - steps
+        eta_seconds = (remaining_steps / fps) if fps > 0 else 0
+
+        # ETA as local timestamp (UTC + user's offset — server never trusts local tz)
+        utc_finish = datetime.now(timezone.utc) + timedelta(seconds=eta_seconds)
+        local_finish = utc_finish + timedelta(hours=self._tz_offset)
+        eta_label = local_finish.strftime("%a %d %b at %H:%M")
+
+        # Cost
+        elapsed_session_hours = elapsed_session / 3600
+        total_elapsed_hours = self._prior_session_hours + elapsed_session_hours
+        cost_so_far = round(total_elapsed_hours * self._hourly_rate, 4)
+        remaining_hours_estimate = (
+            (elapsed_session / steps_this_session * remaining_steps / 3600)
+            if steps_this_session > 0
+            else 0
+        )
+        cost_estimate_total = round(
+            (cost_so_far + remaining_hours_estimate * self._hourly_rate), 4
+        )
+
+        # Training quality
+        win_rate = (
+            round(sum(self._recent_outcomes) / len(self._recent_outcomes), 3)
+            if self._recent_outcomes
+            else None
+        )
+
+        metrics = {
+            "status": "training",
+            "progress": {
+                "steps_completed": steps,
+                "steps_total": total,
+                "percent": percent,
+                "fps": fps,
+            },
+            "time": {
+                "elapsed_session_hours": round(elapsed_session_hours, 3),
+                "elapsed_total_hours": round(total_elapsed_hours, 3),
+                "eta_hours": round(eta_seconds / 3600, 2),
+                "eta_label": eta_label,
+            },
+            "cost": {
+                "hourly_rate": self._hourly_rate,
+                "cost_so_far": cost_so_far,
+                "cost_estimate_total": cost_estimate_total,
+                "currency": "USD",
+            },
+            "training": {
+                "entropy_loss": round(
+                    self.model.logger.name_to_value.get("train/entropy_loss", 0), 4
+                ),
+                "value_loss": round(
+                    self.model.logger.name_to_value.get("train/value_loss", 0), 4
+                ),
+                "policy_loss": round(
+                    self.model.logger.name_to_value.get(
+                        "train/policy_gradient_loss", 0
+                    ),
+                    4,
+                ),
+                "win_rate_last_200": win_rate,
+                "opponent_upgrades": self._upgrade_count,
+            },
+            "meta": {
+                "generated_utc": datetime.now(timezone.utc).isoformat(),
+                "level": self._level,
+            },
+        }
+
+        # Atomic write — eliminates the json.JSONDecodeError race condition
+        tmp = self._metrics_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(metrics, f, indent=2)
+        os.replace(tmp, self._metrics_path)
+
+        # Persist accumulated hours so a crash doesn't lose billing time
+        self._save_total_hours(total_elapsed_hours)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -237,13 +399,18 @@ def train(level: str, resume: bool = False) -> None:
     checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints", level)
     os.makedirs(models_dir, exist_ok=True)
     os.makedirs(checkpoint_dir, exist_ok=True)
+    metrics_path = os.path.join(os.path.dirname(__file__), "metrics.json")
 
     # Build env
     base_env = HexEnv(agent_player=1)
     env = DummyVecEnv([lambda: base_env])
 
     output_path = os.path.join(models_dir, f"hex_{level}.zip")
-    existing_model_path = output_path if os.path.exists(output_path) else None
+    existing_model_path = (
+        output_path
+        if os.path.exists(output_path)
+        else _latest_checkpoint(checkpoint_dir)
+    )
 
     steps_already_done = 0
     initial_opponent_ckpt: str | None = None
@@ -303,6 +470,8 @@ def train(level: str, resume: bool = False) -> None:
             env=base_env,
             checkpoint_dir=checkpoint_dir,
             swap_freq=swap_freq,
+            total_steps=total_steps,
+            level=level,
         ),
     ]
 
@@ -310,6 +479,7 @@ def train(level: str, resume: bool = False) -> None:
         f"\n[hex_train] Level={level}  arch=HexCNN(conv64x3+dense[256,128])  "
         f"target={total_steps:,}  remaining={remaining_steps:,}\n"
     )
+    train_start = time.time()
     model.learn(
         total_timesteps=remaining_steps,
         callback=callbacks,
@@ -323,6 +493,47 @@ def train(level: str, resume: bool = False) -> None:
 
     model.save(output_path)
     print(f"\n[hex_train] Saved model → {output_path}")
+
+    # Write completion marker to metrics file.
+    _hourly_rate = float(os.environ.get("HOURLY_RATE", "0.0"))
+    _elapsed = time.time() - train_start
+    _cost_state_path = os.path.join(os.path.dirname(metrics_path), "cost_state.json")
+    _prior_hours = 0.0
+    if os.path.exists(_cost_state_path):
+        try:
+            with open(_cost_state_path) as _f:
+                _prior_hours = json.load(_f).get("total_hours", 0.0)
+        except (json.JSONDecodeError, OSError):
+            pass
+    _total_hours = _prior_hours + _elapsed / 3600
+    completion = {
+        "status": "complete",
+        "progress": {
+            "steps_completed": total_steps,
+            "steps_total": total_steps,
+            "percent": 100.0,
+            "fps": 0,
+        },
+        "time": {
+            "elapsed_session_hours": round(_elapsed / 3600, 3),
+            "elapsed_total_hours": round(_total_hours, 3),
+            "eta_hours": 0.0,
+            "eta_label": "Complete",
+        },
+        "cost": {
+            "hourly_rate": _hourly_rate,
+            "cost_so_far": round(_total_hours * _hourly_rate, 4),
+            "cost_estimate_total": round(_total_hours * _hourly_rate, 4),
+            "currency": "USD",
+        },
+        "meta": {"generated_utc": datetime.now(timezone.utc).isoformat()},
+    }
+    with open(_cost_state_path, "w") as _f:
+        json.dump({"total_hours": _total_hours}, _f)
+    tmp = metrics_path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(completion, f, indent=2)
+    os.replace(tmp, metrics_path)
 
 
 if __name__ == "__main__":

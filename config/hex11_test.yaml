@@ -1,0 +1,33 @@
+# config/hex11_test.yaml — minimal config for Phase 7 dashboard test
+# Short run (20 iterations) so the dashboard can be observed with real data.
+
+trunk: resnet
+num_res_blocks: 4
+num_channels: 64
+
+num_simulations: 50  # minimum for ~18x18 coverage; below this MCTS degenerates to round-robin
+c_puct: 1.4
+dirichlet_alpha: 0.3
+dirichlet_weight: 0.25
+temperature_threshold: 30
+
+num_workers: 1
+games_per_worker: 4
+
+num_iterations: 20
+train_steps_per_iter: 10
+batch_size: 32
+lr_init: 0.001
+min_buffer_size: 50
+buffer_size: 10000
+
+arena_freq: 999
+arena_games: 20
+arena_simulations: 50
+promotion_threshold: 0.55
+
+checkpoint_freq: 999
+model_dir: training/models
+checkpoint_dir: training/checkpoints
+
+level: az
