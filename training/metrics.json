@@ -1,16 +1,16 @@
 {
-  "status": "training",
+  "status": "complete",
   "progress": {
-    "steps_completed": 0,
-    "steps_total": 1000,
-    "percent": 0.0,
-    "fps": 0.0
+    "steps_completed": 3,
+    "steps_total": 3,
+    "percent": 100.0,
+    "fps": 0.005
   },
   "time": {
-    "elapsed_session_hours": 0.0,
-    "elapsed_total_hours": 4.244,
+    "elapsed_session_hours": 0.175,
+    "elapsed_total_hours": 4.419,
     "eta_hours": 0.0,
-    "eta_label": "Sat 21 Mar at 20:51"
+    "eta_label": "Sun 22 Mar at 01:10"
   },
   "cost": {
     "hourly_rate": 0.0,
@@ -19,16 +19,16 @@
     "currency": "USD"
   },
   "training": {
-    "policy_loss": 0.0,
-    "value_loss": 0.0,
-    "win_rate_last_200": null,
+    "policy_loss": 1.659,
+    "value_loss": 1.0126,
+    "win_rate_last_200": 0.9167,
     "arena_win_rate": null,
     "network_promotions": 0,
-    "buffer_size": 0,
-    "iteration": 0
+    "buffer_size": 1451,
+    "iteration": 3
   },
   "meta": {
-    "generated_utc": "2026-03-21T20:51:26.381330+00:00",
+    "generated_utc": "2026-03-22T01:10:13.366660+00:00",
     "level": "az"
   }
 }
