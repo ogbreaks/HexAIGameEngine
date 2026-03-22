@@ -15,25 +15,31 @@ echo '{"status":"complete","progress":{"percent":100}}' > training/metrics.json
 # Upload model to GCS if bucket is specified
 if [ -n "${GCS_BUCKET}" ]; then
     echo "Uploading models to GCS bucket: ${GCS_BUCKET}..."
+
+    # Generate unique run ID from timestamp
+    RUN_ID=$(date +%Y%m%d_%H%M%S)
+    CONFIG_NAME=$(basename ${TRAINING_CONFIG:-config/hex11_default.yaml} .yaml)
+
     python -c "
 from google.cloud import storage
 import os
 
 client = storage.Client()
 bucket = client.bucket('${GCS_BUCKET}')
+run_id = '${RUN_ID}'
+config = '${CONFIG_NAME}'
 
 files = [
-    '/app/training/models/hex_az_best.pth',
-    '/app/training/models/hex_az_best.onnx',
+    ('/app/training/models/hex_az_best.pth', f'{config}/{run_id}/hex_az_best.pth'),
+    ('/app/training/models/hex_az_best.onnx', f'{config}/{run_id}/hex_az_best.onnx'),
 ]
 
-for path in files:
-    if os.path.exists(path):
-        filename = os.path.basename(path)
-        bucket.blob(filename).upload_from_filename(path)
-        print(f'Uploaded {filename} to gs://${GCS_BUCKET}/{filename}')
+for local_path, gcs_path in files:
+    if os.path.exists(local_path):
+        bucket.blob(gcs_path).upload_from_filename(local_path)
+        print(f'Uploaded to gs://${GCS_BUCKET}/{gcs_path}')
     else:
-        print(f'Skipped {path} — not found')
+        print(f'Skipped {local_path} — not found')
 "
 else
     echo "GCS_BUCKET not set — skipping model upload"
