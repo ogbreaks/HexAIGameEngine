@@ -1,6 +1,28 @@
 #!/bin/bash
 set -e
 
+on_exit() {
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo "ERROR: Script exited with code ${EXIT_CODE}"
+    fi
+    echo "Shutting down in 30 seconds (final metrics scrape)..."
+    sleep 30
+    INSTANCE=$(curl -sf -H "Metadata-Flavor: Google" \
+        http://metadata.google.internal/computeMetadata/v1/instance/name 2>/dev/null || echo "")
+    ZONE=$(curl -sf -H "Metadata-Flavor: Google" \
+        http://metadata.google.internal/computeMetadata/v1/instance/zone 2>/dev/null \
+        | cut -d/ -f4 || echo "")
+    if [ -n "${INSTANCE}" ] && [ -n "${ZONE}" ]; then
+        echo "Stopping instance ${INSTANCE} in zone ${ZONE}..."
+        gcloud compute instances stop "${INSTANCE}" --zone="${ZONE}" --quiet
+    else
+        echo "Not running on GCE — skipping auto-shutdown"
+    fi
+    kill $METRICS_PID 2>/dev/null
+}
+trap on_exit EXIT
+
 # Start metrics server in background
 uvicorn metrics_server:app --host 0.0.0.0 --port 8080 &
 METRICS_PID=$!
@@ -45,24 +67,4 @@ else
     echo "GCS_BUCKET not set — skipping model upload"
 fi
 
-# Keep metrics server alive for 10 minutes
-echo "Training complete (exit ${TRAINING_EXIT}). Metrics available for 10 minutes..."
-sleep 600
-
-# Auto-terminate this GCE instance using metadata server
-# Only runs inside GCE — fails gracefully elsewhere
-INSTANCE_NAME=$(curl -sf -H "Metadata-Flavor: Google" \
-    http://metadata.google.internal/computeMetadata/v1/instance/name 2>/dev/null || echo "")
-ZONE=$(curl -sf -H "Metadata-Flavor: Google" \
-    http://metadata.google.internal/computeMetadata/v1/instance/zone 2>/dev/null \
-    | cut -d/ -f4 || echo "")
-
-if [ -n "${INSTANCE_NAME}" ] && [ -n "${ZONE}" ]; then
-    echo "Shutting down instance ${INSTANCE_NAME} in zone ${ZONE}..."
-    gcloud compute instances stop "${INSTANCE_NAME}" --zone="${ZONE}" --quiet
-else
-    echo "Not running on GCE — skipping auto-shutdown"
-fi
-
-kill $METRICS_PID 2>/dev/null
 exit ${TRAINING_EXIT}
