@@ -16,6 +16,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import sys
 
@@ -80,6 +81,54 @@ def play_random_vs_random(num_games: int) -> None:
     print(f"Errors          : {errors}")
 
 
+def apply_env_overrides(config: dict) -> dict:
+    """Override config values with environment variables if set."""
+    int_keys = {
+        "NUM_ITERATIONS": "num_iterations",
+        "NUM_WORKERS": "num_workers",
+        "GAMES_PER_WORKER": "games_per_worker",
+        "NUM_SIMULATIONS": "num_simulations",
+        "BATCH_SIZE": "batch_size",
+        "TRAIN_STEPS_PER_ITER": "train_steps_per_iter",
+        "MIN_BUFFER_SIZE": "min_buffer_size",
+        "BUFFER_SIZE": "buffer_size",
+        "ARENA_FREQ": "arena_freq",
+        "ARENA_GAMES": "arena_games",
+        "ARENA_SIMULATIONS": "arena_simulations",
+        "NUM_RES_BLOCKS": "num_res_blocks",
+        "NUM_CHANNELS": "num_channels",
+        "CHECKPOINT_FREQ": "checkpoint_freq",
+    }
+    float_keys = {
+        "LR_INIT": "lr_init",
+        "PROMOTION_THRESHOLD": "promotion_threshold",
+        "WEIGHT_DECAY": "weight_decay",
+    }
+    bool_keys = {
+        "USE_INFERENCE_SERVER": "use_inference_server",
+    }
+
+    for env_key, config_key in int_keys.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            config[config_key] = int(val)
+            print(f"[Config] {config_key} overridden by env: {config[config_key]}")
+
+    for env_key, config_key in float_keys.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            config[config_key] = float(val)
+            print(f"[Config] {config_key} overridden by env: {config[config_key]}")
+
+    for env_key, config_key in bool_keys.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            config[config_key] = val.lower() == "true"
+            print(f"[Config] {config_key} overridden by env: {config[config_key]}")
+
+    return config
+
+
 def train_az(config_path: str, resume_path: str | None = None) -> None:
     """Launch AlphaZero training with the given config."""
     import yaml  # type: ignore[import]
@@ -87,6 +136,8 @@ def train_az(config_path: str, resume_path: str | None = None) -> None:
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
+
+    config = apply_env_overrides(config)
 
     if resume_path:
         print(f"[AZ] Resuming from checkpoint: {resume_path}")
