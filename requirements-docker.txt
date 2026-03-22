@@ -1,0 +1,10 @@
+torch==2.1.0
+numpy
+fastapi
+uvicorn
+pyyaml
+onnx
+onnxscript
+tensorboard
+tqdm
+google-cloud-storage

@@ -1,12 +1,18 @@
 FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl apt-transport-https gnupg && \
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+    gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] \
+    https://packages.cloud.google.com/apt cloud-sdk main" | \
+    tee /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    apt-get update && apt-get install -y google-cloud-cli && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY requirements-training.txt .
-RUN iconv -f UTF-16LE -t UTF-8 requirements-training.txt > /tmp/req.txt \
-    && pip install --no-cache-dir -r /tmp/req.txt
+COPY requirements-docker.txt .
+RUN pip install --no-cache-dir -r requirements-docker.txt
 
 RUN mkdir -p training/models training/checkpoints training/results
 
