@@ -64,8 +64,6 @@ systemctl start containerd docker
 # Restart Docker to pick up NVIDIA runtime
 systemctl restart docker
 
-# Clean up old images before pulling new ones
-docker image prune -af
 docker pull pixelpunk77/hexai-az:latest
 docker run --gpus all \
   -e HOURLY_RATE=${HOURLY_RATE:-0.27} \

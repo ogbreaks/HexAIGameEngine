@@ -52,8 +52,6 @@ rm -rf /var/lib/containerd
 ln -s $MOUNT_POINT/containerd /var/lib/containerd
 systemctl start containerd docker
 
-# Clean up old images before pulling new ones
-docker image prune -af
 docker pull pixelpunk77/hexai-az:latest
 docker run \
   -e HOURLY_RATE=${HOURLY_RATE:-0.19} \
