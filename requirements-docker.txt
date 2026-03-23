@@ -8,3 +8,5 @@ onnxscript
 tensorboard
 tqdm
 google-cloud-storage
+psutil
+pynvml

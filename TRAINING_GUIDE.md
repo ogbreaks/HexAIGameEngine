@@ -336,14 +336,14 @@ gcloud compute instances create hexai-gpu \
   --instance-termination-action=STOP \
   --scopes=cloud-platform \
   --tags=hexai-training \
-  --image-family=common-cu121 \
+  --image-family=common-cu128-ubuntu-2204-nvidia-570 \
   --image-project=deeplearning-platform-release \
   --boot-disk-size=50GB \
   "--disk=name=hexai-data,device-name=hexai-data,auto-delete=no" \
   --metadata-from-file=startup-script=startup-gpu.sh
 ```
 
-> **Why `common-cu121`?** The startup script installs the NVIDIA *container toolkit* (which wires up Docker's `--gpus` flag) but not the underlying GPU *driver*. The Deep Learning VM image provides the driver layer (`libnvidia-ml.so.1`) that the toolkit depends on.
+> **Why `common-cu128-ubuntu-2204-nvidia-570`?** The startup script installs the NVIDIA *container toolkit* (which wires up Docker's `--gpus` flag) but not the underlying GPU *driver*. The Deep Learning VM image provides the driver layer (`libnvidia-ml.so.1`) that the toolkit depends on.
 
 The startup script's default env vars are set for a meaningful GPU run:
 

@@ -2,6 +2,7 @@
 import json
 import os
 
+import psutil
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -18,6 +19,16 @@ app.add_middleware(
 # Resolve path relative to this file regardless of cwd
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 METRICS_PATH = os.path.join(_BASE_DIR, "training", "metrics.json")
+
+# NVIDIA GPU monitoring — optional, graceful fallback if driver absent
+_gpu_available = False
+try:
+    import pynvml
+
+    pynvml.nvmlInit()
+    _gpu_available = True
+except Exception:
+    pass
 
 
 @app.get("/metrics")
@@ -91,6 +102,24 @@ def dashboard() -> HTMLResponse:
         .status-waiting  { background: #4b4b4b; color: #ccc; }
         .footer { margin-top: 20px; color: #444; font-size: 0.75em; text-align: center; }
         .eta-big { font-size: 1.3em; color: #4ade80; font-weight: 600; }
+        /* Hardware bars */
+        .bar-section { margin-top: 10px; }
+        .bar-section label { display:block; color:#888; font-size:0.75em; margin-bottom:6px; }
+        .bar-row { display:flex; align-items:flex-end; gap:3px; height:40px; }
+        .cpu-bar {
+            flex:1; background:#3b82f6; border-radius:3px 3px 0 0;
+            transition: height 0.4s ease; min-height:2px;
+        }
+        .gpu-bar-wrap { display:flex; align-items:flex-end; height:40px; width:100%; }
+        .gpu-bar {
+            background: linear-gradient(180deg,#f97316,#ef4444);
+            border-radius:3px 3px 0 0; width:100%;
+            transition: height 0.4s ease; min-height:2px;
+        }
+        .bar-floor { border-top:1px solid #333; margin-top:2px; }
+        .hw-metric { display:flex; justify-content:space-between;
+                     font-size:0.8em; color:#888; margin-top:6px; }
+        .hw-metric span { color:#ccc; }
     </style>
 </head>
 <body>
@@ -184,8 +213,67 @@ def dashboard() -> HTMLResponse:
             </div>
         </div>
 
+        <div class="card">
+            <h2>Hardware</h2>
+            <div class="bar-section">
+                <label>CPU Cores</label>
+                <div class="bar-row" id="cpu-bars"></div>
+                <div class="bar-floor"></div>
+            </div>
+            <div class="bar-section" id="gpu-section" style="display:none; margin-top:14px;">
+                <label>GPU Utilisation</label>
+                <div class="gpu-bar-wrap">
+                    <div class="gpu-bar" id="gpu-bar" style="height:2px"></div>
+                </div>
+                <div class="bar-floor"></div>
+                <div class="hw-metric">
+                    <span>Util</span><span id="gpu-util">&#8212;</span>
+                </div>
+                <div class="hw-metric">
+                    <span>VRAM</span><span id="gpu-vram">&#8212;</span>
+                </div>
+                <div class="hw-metric">
+                    <span>Temp</span><span id="gpu-temp">&#8212;</span>
+                </div>
+            </div>
+        </div>
+
     </div>
-    <div class="footer" id="footer">Refreshing every 10s</div>
+
+<script>
+async function refreshHardware() {
+    try {
+        const r = await fetch('/hardware');
+        const d = await r.json();
+
+        // CPU bars
+        const cpuBars = document.getElementById('cpu-bars');
+        if (cpuBars.children.length !== d.cpu.length) {
+            cpuBars.innerHTML = d.cpu.map(() => '<div class="cpu-bar"></div>').join('');
+        }
+        d.cpu.forEach((pct, i) => {
+            cpuBars.children[i].style.height = Math.max(2, pct * 0.4) + 'px';
+            cpuBars.children[i].title = pct.toFixed(0) + '%';
+        });
+
+        // GPU bars
+        const gpuSection = document.getElementById('gpu-section');
+        if (d.gpu) {
+            gpuSection.style.display = '';
+            document.getElementById('gpu-bar').style.height = Math.max(2, d.gpu.util * 0.4) + 'px';
+            document.getElementById('gpu-util').textContent = d.gpu.util + '%';
+            document.getElementById('gpu-vram').textContent =
+                d.gpu.mem_used_gb + ' / ' + d.gpu.mem_total_gb + ' GB';
+            document.getElementById('gpu-temp').textContent = d.gpu.temp + '\u00b0C';
+        } else {
+            gpuSection.style.display = 'none';
+        }
+    } catch(e) {}
+}
+
+refreshHardware();
+setInterval(refreshHardware, 2000);
+</script>
 
 <script>
 async function refresh() {
@@ -276,6 +364,27 @@ setInterval(refresh, 10000);
 </html>
 """
     )
+
+
+@app.get("/hardware")
+def hardware() -> JSONResponse:
+    cpu = psutil.cpu_percent(percpu=True, interval=0.1)
+    result: dict = {"cpu": cpu, "gpu": None}
+    if _gpu_available:
+        try:
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            temp = pynvml.nvmlDeviceGetTemperature(handle, pynvml.NVML_TEMPERATURE_GPU)
+            result["gpu"] = {
+                "util": util.gpu,
+                "mem_used_gb": round(mem.used / 1e9, 1),
+                "mem_total_gb": round(mem.total / 1e9, 1),
+                "temp": temp,
+            }
+        except Exception:
+            pass
+    return JSONResponse(result)
 
 
 @app.get("/health")
