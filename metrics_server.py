@@ -120,12 +120,39 @@ def dashboard() -> HTMLResponse:
         .hw-metric { display:flex; justify-content:space-between;
                      font-size:0.8em; color:#888; margin-top:6px; }
         .hw-metric span { color:#ccc; }
+        /* Phase badge */
+        .phase-badge {
+            display:inline-block; padding:3px 10px; border-radius:12px;
+            font-size:0.75em; font-weight:600; letter-spacing:0.05em;
+            text-transform:uppercase;
+        }
+        .phase-self_play  { background:#7c3aed; color:#e0d4fc; }
+        .phase-training   { background:#0d9488; color:#ccfbf1; }
+        .phase-arena      { background:#b45309; color:#fef3c7; }
+        .phase-checkpoint  { background:#4338ca; color:#c7d2fe; }
+        .phase-idle       { background:#333;    color:#888; }
+        .phase-init       { background:#333;    color:#888; }
+        /* Sub-progress mini bar */
+        .sub-progress-wrap {
+            margin-top:8px; display:flex; align-items:center; gap:10px;
+        }
+        .sub-bar-bg {
+            flex:1; background:#2a2a2a; border-radius:6px; height:6px;
+            overflow:hidden;
+        }
+        .sub-bar-fill {
+            background:linear-gradient(90deg,#6366f1,#a78bfa);
+            height:100%; border-radius:6px;
+            transition:width 0.5s ease;
+        }
+        .sub-label { color:#888; font-size:0.8em; white-space:nowrap; }
     </style>
 </head>
 <body>
     <h1>&#x2B21; HexAI Training Monitor</h1>
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
         <div id="status-pill" class="status-pill status-waiting">Waiting</div>
+        <div id="phase-badge" class="phase-badge phase-init" style="display:none;"></div>
         <span id="loading-msg" style="color:#666; font-size:0.85em;">Loading data...</span>
     </div>
     <div class="grid">
@@ -150,6 +177,12 @@ def dashboard() -> HTMLResponse:
             <div class="metric">
                 <span class="label">Speed</span>
                 <span class="value" id="fps">&#8212;</span>
+            </div>
+            <div id="sub-progress-row" class="sub-progress-wrap" style="display:none;">
+                <div class="sub-bar-bg">
+                    <div class="sub-bar-fill" id="sub-fill" style="width:0%"></div>
+                </div>
+                <span class="sub-label" id="sub-label">&#8212;</span>
             </div>
         </div>
 
@@ -311,6 +344,29 @@ async function refresh() {
             (d.progress?.steps_total ?? 0).toLocaleString();
         document.getElementById('fps').textContent =
             d.progress?.fps != null ? d.progress.fps + ' steps/s' : '\u2014';
+
+        // Phase badge
+        const phase = d.phase;
+        const badge = document.getElementById('phase-badge');
+        if (phase && phase.name && d.status === 'training') {
+            const labels = {self_play:'Self-Play', training:'Training', arena:'Arena', checkpoint:'Checkpoint', idle:'Idle', init:'Init'};
+            badge.textContent = labels[phase.name] ?? phase.name;
+            badge.className = 'phase-badge phase-' + phase.name;
+            badge.style.display = '';
+        } else {
+            badge.style.display = 'none';
+        }
+
+        // Sub-progress
+        const subRow = document.getElementById('sub-progress-row');
+        if (phase && phase.sub_total > 0 && d.status === 'training') {
+            const subPct = Math.min(100, Math.round(phase.sub_done / phase.sub_total * 100));
+            document.getElementById('sub-fill').style.width = subPct + '%';
+            document.getElementById('sub-label').textContent = phase.sub_label || '';
+            subRow.style.display = '';
+        } else {
+            subRow.style.display = 'none';
+        }
 
         // Time
         document.getElementById('elapsed-session').textContent =

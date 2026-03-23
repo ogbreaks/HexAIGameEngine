@@ -93,6 +93,12 @@ class Coach:
         self._promotion_count: int = 0
         self._recent_outcomes: deque[int] = deque(maxlen=200)  # 1=win, 0=loss
 
+        # Phase tracking (read-only telemetry for dashboard)
+        self._phase: str = "init"
+        self._sub_done: int = 0
+        self._sub_total: int = 0
+        self._sub_label: str = ""
+
         # Cost tracking
         self._prior_session_hours: float = self._load_prior_hours()
         self._hourly_rate: float = float(os.environ.get("HOURLY_RATE", "0.0"))
@@ -147,7 +153,12 @@ class Coach:
         total_policy_loss = 0.0
         total_value_loss = 0.0
 
-        for _ in range(steps):
+        for step_i in range(steps):
+            self._sub_done = step_i
+            self._sub_label = f"{step_i}/{steps} steps"
+            if step_i > 0 and step_i % 20 == 0:
+                self._write_metrics(status="training")
+
             states, pi_targets, v_targets = self.replay_buffer.sample(batch_size)
 
             states_t = torch.FloatTensor(states).to(self.device)
@@ -319,6 +330,12 @@ class Coach:
                 "buffer_size": len(self.replay_buffer),
                 "iteration": self.iteration,
             },
+            "phase": {
+                "name": self._phase,
+                "sub_done": self._sub_done,
+                "sub_total": self._sub_total,
+                "sub_label": self._sub_label,
+            },
             "meta": {
                 "generated_utc": datetime.now(timezone.utc).isoformat(),
                 "level": self.config.get("level", "az"),
@@ -387,6 +404,12 @@ class Coach:
             print(f"\n[Coach] Iteration {i}/{num_iterations}")
 
             # 1. Self-play data generation
+            total_games = num_workers * games_per_worker
+            self._phase = "self_play"
+            self._sub_done = 0
+            self._sub_total = total_games
+            self._sub_label = f"0/{total_games} games"
+            self._write_metrics(status="training")
             print(
                 f"[Coach] Generating self-play data ({num_workers}w × {games_per_worker}g)…"
             )
@@ -415,10 +438,18 @@ class Coach:
                     # Record from player-1 perspective
                     self._recent_outcomes.append(1 if winner == 1 else 0)
 
+            self._sub_done = total_games
+            self._sub_label = f"{total_games}/{total_games} games"
             print(f"[Coach] Buffer size: {len(self.replay_buffer)}")
 
             # 2. Train on buffer
             if len(self.replay_buffer) >= min_buffer:
+                steps = self.config.get("train_steps_per_iter", 100)
+                self._phase = "training"
+                self._sub_done = 0
+                self._sub_total = steps
+                self._sub_label = f"0/{steps} steps"
+                self._write_metrics(status="training")
                 print("[Coach] Training network…")
                 self._train_epoch()
                 print(
@@ -432,10 +463,20 @@ class Coach:
 
             # 3. Arena evaluation
             if i > 0 and i % arena_freq == 0:
+                arena_games = self.config.get("arena_games", 40)
+                self._phase = "arena"
+                self._sub_done = 0
+                self._sub_total = arena_games
+                self._sub_label = f"{arena_games} games"
+                self._write_metrics(status="training")
                 print("[Coach] Running arena evaluation…")
                 self._evaluate_and_promote()
 
             # 4. Write metrics — increment first so count reflects completed iterations
+            self._phase = "idle"
+            self._sub_done = 0
+            self._sub_total = 0
+            self._sub_label = ""
             self.iteration = i + 1
             self._write_metrics(status="training")
 
@@ -444,6 +485,9 @@ class Coach:
 
             # 6. Periodic checkpoint
             if i > 0 and i % checkpoint_freq == 0:
+                self._phase = "checkpoint"
+                self._sub_label = f"iter {i}"
+                self._write_metrics(status="training")
                 self._save_checkpoint(str(i))
                 print(f"[Coach] Checkpoint saved at iteration {i}")
 
