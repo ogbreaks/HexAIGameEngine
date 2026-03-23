@@ -68,7 +68,7 @@ docker pull pixelpunk77/hexai-az:latest
 docker run --gpus all \
   -e HOURLY_RATE=${HOURLY_RATE:-0.27} \
   -e TIMEZONE_OFFSET=${TIMEZONE_OFFSET:-1} \
-  -e TRAINING_CONFIG=${TRAINING_CONFIG:-config/hex11_default.yaml} \
+  -e TRAINING_CONFIG=${TRAINING_CONFIG:-config/hex11_cloud.yaml} \
   -e GCS_BUCKET=${GCS_BUCKET:-hexai-models} \
   -e NUM_ITERATIONS=${NUM_ITERATIONS:-200} \
   -e NUM_WORKERS=${NUM_WORKERS:-4} \
