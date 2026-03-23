@@ -106,10 +106,12 @@ def dashboard() -> HTMLResponse:
         .bar-section { margin-top: 10px; }
         .bar-section label { display:block; color:#888; font-size:0.75em; margin-bottom:6px; }
         .bar-row { display:flex; align-items:flex-end; gap:3px; height:40px; }
+        .cpu-col { flex:1; display:flex; flex-direction:column; align-items:center; }
         .cpu-bar {
-            flex:1; background:#3b82f6; border-radius:3px 3px 0 0;
+            width:100%; background:#3b82f6; border-radius:3px 3px 0 0;
             transition: height 0.4s ease; min-height:2px;
         }
+        .cpu-pct { font-size:0.65em; color:#888; margin-top:4px; }
         .gpu-bar-wrap { display:flex; align-items:flex-end; height:40px; width:100%; }
         .gpu-bar {
             background: linear-gradient(180deg,#f97316,#ef4444);
@@ -282,11 +284,15 @@ async function refreshHardware() {
         // CPU bars
         const cpuBars = document.getElementById('cpu-bars');
         if (cpuBars.children.length !== d.cpu.length) {
-            cpuBars.innerHTML = d.cpu.map(() => '<div class="cpu-bar"></div>').join('');
+            cpuBars.innerHTML = d.cpu.map((_, i) =>
+                '<div class="cpu-col"><div class="cpu-bar"></div><span class="cpu-pct"></span></div>'
+            ).join('');
         }
         d.cpu.forEach((pct, i) => {
-            cpuBars.children[i].style.height = Math.max(2, pct * 0.4) + 'px';
-            cpuBars.children[i].title = pct.toFixed(0) + '%';
+            const col = cpuBars.children[i];
+            col.querySelector('.cpu-bar').style.height = Math.max(2, pct * 0.4) + 'px';
+            col.querySelector('.cpu-pct').textContent = pct.toFixed(0) + '%';
+            col.title = 'Core ' + i + ': ' + pct.toFixed(0) + '%';
         });
 
         // GPU bars
