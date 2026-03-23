@@ -1,0 +1,53 @@
+# hex11_t4.yaml — AlphaZero 11×11 Hex tuned for GCE n1-standard-16 + T4
+# Target: strong, competent AI in ~2 hours (~$1 SPOT).
+# 10×128 ResNet is proven for Hex — fast inference, strong convergence.
+
+# ── Network ──────────────────────────────────────────────────────────────────
+trunk: resnet
+num_res_blocks: 10
+num_channels: 128
+
+# ViT-only settings (ignored when trunk=resnet)
+vit_heads: 8
+vit_layers: 6
+vit_ff_dim: 512
+vit_dropout: 0.1
+
+# ── MCTS ─────────────────────────────────────────────────────────────────────
+num_simulations: 200
+c_puct: 1.4
+dirichlet_alpha: 0.3
+dirichlet_weight: 0.25
+temperature_threshold: 30
+
+# ── Self-play ─────────────────────────────────────────────────────────────────
+num_workers: 16
+games_per_worker: 10       # 160 games/iter — good data volume, fast iterations
+
+# ── GPU Inference Server ─────────────────────────────────────────────────────
+use_inference_server: true
+inference_batch_size: 64
+inference_max_wait_ms: 5
+
+# ── Training ─────────────────────────────────────────────────────────────────
+num_iterations: 100
+train_steps_per_iter: 100
+batch_size: 256
+lr_init: 0.001
+weight_decay: 0.0001
+min_buffer_size: 2500      # training starts on iteration 1
+buffer_size: 200000
+
+# ── Arena ─────────────────────────────────────────────────────────────────────
+arena_freq: 10
+arena_games: 40
+arena_simulations: 200
+promotion_threshold: 0.55
+
+# ── Checkpointing ────────────────────────────────────────────────────────────
+checkpoint_freq: 25
+model_dir: training/models
+checkpoint_dir: training/checkpoints
+
+# ── Metadata ─────────────────────────────────────────────────────────────────
+level: az_t4
