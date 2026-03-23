@@ -30,20 +30,28 @@ fi
 
 mount $DISK_DEV $MOUNT_POINT
 
-# Point Docker storage to persistent disk
+# Point Docker + containerd storage to persistent disk
 mkdir -p $MOUNT_POINT/docker
+mkdir -p $MOUNT_POINT/containerd
 mkdir -p $MOUNT_POINT/models
 
 # Install Docker first so /etc/docker exists
 curl -fsSL https://get.docker.com | sh
 
-# NOW write daemon.json - directory exists
+# Redirect Docker data-root
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<EOF
 {
   "data-root": "$MOUNT_POINT/docker"
 }
 EOF
+
+# Redirect containerd root (Docker 29+ stores image layers here)
+systemctl stop containerd
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+sed -i 's|root = "/var/lib/containerd"|root = "'$MOUNT_POINT'/containerd"|' /etc/containerd/config.toml
+systemctl start containerd
 
 # Restart Docker to pick up new data-root
 systemctl restart docker

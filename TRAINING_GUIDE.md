@@ -290,6 +290,38 @@ For full cloud deployment commands, persistent disk setup, GCS model storage, an
 
 5. **Persistent disk** (`hexai-data`) — stores Docker layer cache and models at `/mnt/hexai/`. First pull takes ~40 mins; subsequent runs are near-instant.
 
+### Monitoring a Running Instance
+
+Use the **GCP Console browser SSH** (no local SSH client needed):
+1. Go to **Compute Engine → VM instances**
+2. Click the **SSH** button next to your instance
+3. A browser-based terminal opens directly on the VM
+
+Useful commands once connected (use `sudo` — Docker dirs are root-owned):
+```bash
+# Check persistent disk is mounted
+df -h /mnt/hexai
+
+# Check Docker is using persistent disk
+sudo docker info | grep "Docker Root Dir"
+# Should show: /mnt/hexai/docker
+
+# See Docker layer cache size
+sudo du -sh /mnt/hexai/docker/
+
+# List saved models
+ls -la /mnt/hexai/models/
+
+# Check if container is running
+sudo docker ps
+
+# Follow container logs live
+sudo docker logs -f $(sudo docker ps -q)
+
+# View startup script logs
+sudo journalctl -u google-startup-scripts -f
+```
+
 ### Key files
 
 | File | Purpose |

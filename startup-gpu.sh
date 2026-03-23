@@ -30,8 +30,9 @@ fi
 
 mount $DISK_DEV $MOUNT_POINT
 
-# Point Docker storage to persistent disk
+# Point Docker + containerd storage to persistent disk
 mkdir -p $MOUNT_POINT/docker
+mkdir -p $MOUNT_POINT/containerd
 mkdir -p $MOUNT_POINT/models
 
 # Install Docker first so /etc/docker exists
@@ -46,13 +47,20 @@ curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-contai
 apt-get update && apt-get install -y nvidia-container-toolkit
 nvidia-ctk runtime configure --runtime=docker
 
-# NOW write daemon.json - directory exists
+# Redirect Docker data-root
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<EOF
 {
   "data-root": "$MOUNT_POINT/docker"
 }
 EOF
+
+# Redirect containerd root (Docker 29+ stores image layers here)
+systemctl stop containerd
+mkdir -p /etc/containerd
+containerd config default > /etc/containerd/config.toml
+sed -i 's|root = "/var/lib/containerd"|root = "'$MOUNT_POINT'/containerd"|' /etc/containerd/config.toml
+systemctl start containerd
 
 # Restart Docker to pick up new data-root + NVIDIA runtime
 systemctl restart docker
