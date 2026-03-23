@@ -322,6 +322,56 @@ sudo docker logs -f $(sudo docker ps -q)
 sudo journalctl -u google-startup-scripts -f
 ```
 
+### Creating a GPU Instance
+
+Use the **Deep Learning VM** image (`common-cu121`) — it ships with NVIDIA drivers and CUDA pre-installed. The plain `ubuntu-2204-lts` image does **not** include GPU drivers and will fail with `libnvidia-ml.so.1: cannot open shared object file`.
+
+```bash
+gcloud compute instances create hexai-gpu \
+  --zone=us-central1-a \
+  --machine-type=n1-standard-4 \
+  "--accelerator=type=nvidia-tesla-t4,count=1" \
+  --maintenance-policy=TERMINATE \
+  --provisioning-model=SPOT \
+  --instance-termination-action=STOP \
+  --scopes=cloud-platform \
+  --tags=hexai-training \
+  --image-family=common-cu121 \
+  --image-project=deeplearning-platform-release \
+  --boot-disk-size=50GB \
+  "--disk=name=hexai-data,device-name=hexai-data,auto-delete=no" \
+  --metadata-from-file=startup-script=startup-gpu.sh
+```
+
+> **Why `common-cu121`?** The startup script installs the NVIDIA *container toolkit* (which wires up Docker's `--gpus` flag) but not the underlying GPU *driver*. The Deep Learning VM image provides the driver layer (`libnvidia-ml.so.1`) that the toolkit depends on.
+
+The startup script's default env vars are set for a meaningful GPU run:
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `NUM_ITERATIONS` | `200` | Override with `--metadata` or edit script |
+| `NUM_WORKERS` | `4` | Parallel self-play workers |
+| `NUM_SIMULATIONS` | `400` | MCTS sims per move |
+
+> The startup script is uploaded to GCE metadata at `gcloud create` time. Any edits to `startup-gpu.sh` take effect on the **next** `gcloud create` invocation — no separate metadata update step needed.
+
+### Diagnosing Startup Failures
+
+Startup script stdout/stderr is captured by Cloud Logging. Query in **Logs Explorer**:
+```
+resource.type="gce_instance"
+resource.labels.instance_id="hexai-gpu"
+logName=~"google-startup-scripts"
+```
+
+Common failures:
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `libnvidia-ml.so.1: cannot open shared object file` | Plain Ubuntu image, no GPU driver | Use `common-cu121` image |
+| `exit status 127` in startup-script | Command not found (often `blkid`/`mount` from stripped PATH) | Check full log for preceding line |
+| VM stops after ~2 min | Script failed before Docker pull | Check startup-script logs above |
+
 ### Key files
 
 | File | Purpose |
