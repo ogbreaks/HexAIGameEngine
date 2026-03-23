@@ -102,6 +102,7 @@ Runs on `localhost:5000`. Endpoints: `/state`, `/move`, `/reset`, `/mcts_move`.
 
 | Config | Purpose | Network | Games/iter | Iterations |
 |--------|---------|---------|------------|------------|
+| `hex11_micro.yaml` | Minimal 10-iteration test | 4 blocks, 64ch | 2 | 10 |
 | `hex11_test.yaml` | Quick sanity check | 4 blocks, 64ch | 4 | 20 |
 | `hex11_default.yaml` | Standard training | 10 blocks, 128ch | 100 | 1000 |
 | `hex11_cloud.yaml` | Scaled cloud run | 20 blocks, 256ch | 800 | 5000 |
@@ -149,17 +150,57 @@ Runs on `localhost:5000`. Endpoints: `/state`, `/move`, `/reset`, `/mcts_move`.
 
 ## Environment Variables
 
+All environment variables are optional. When set, they override the corresponding value from the YAML config file (applied by `apply_env_overrides()` in `main.py`).
+
+### Runtime variables
+
 | Variable | Default | Purpose |
-|----------|---------|---------|
+|----------|---------|--------|
 | `HOURLY_RATE` | `0.0` | Cloud compute $/hr for cost tracking |
 | `TIMEZONE_OFFSET` | `0` | Hours from UTC for ETA display |
+| `TRAINING_CONFIG` | `config/hex11_cloud.yaml` | Config file to use |
+| `GCS_BUCKET` | *(unset)* | GCS bucket for model upload (skipped if unset) |
 | `MODEL_PATH` | `training/models/hex_az_best.pth` | Model for server `/mcts_move` |
 
-Example:
+### Config override variables
+
+| Variable | Type | Config key |
+|----------|------|------------|
+| `NUM_ITERATIONS` | int | `num_iterations` |
+| `NUM_WORKERS` | int | `num_workers` |
+| `GAMES_PER_WORKER` | int | `games_per_worker` |
+| `NUM_SIMULATIONS` | int | `num_simulations` |
+| `BATCH_SIZE` | int | `batch_size` |
+| `TRAIN_STEPS_PER_ITER` | int | `train_steps_per_iter` |
+| `MIN_BUFFER_SIZE` | int | `min_buffer_size` |
+| `BUFFER_SIZE` | int | `buffer_size` |
+| `LR_INIT` | float | `lr_init` |
+| `ARENA_FREQ` | int | `arena_freq` |
+| `ARENA_GAMES` | int | `arena_games` |
+| `ARENA_SIMULATIONS` | int | `arena_simulations` |
+| `PROMOTION_THRESHOLD` | float | `promotion_threshold` |
+| `NUM_RES_BLOCKS` | int | `num_res_blocks` |
+| `NUM_CHANNELS` | int | `num_channels` |
+| `CHECKPOINT_FREQ` | int | `checkpoint_freq` |
+| `USE_INFERENCE_SERVER` | bool | `use_inference_server` |
+| `WEIGHT_DECAY` | float | `weight_decay` |
+
+Overridden values are logged on startup:
+```
+[Config] num_iterations overridden by env: 10
+[Config] num_workers overridden by env: 2
+```
+
+Example (local):
 ```powershell
 $env:HOURLY_RATE = "0.35"
 $env:TIMEZONE_OFFSET = "10"
 python main.py --mode train_az --config config/hex11_cloud.yaml
+```
+
+Example (Docker):
+```bash
+docker run -e NUM_ITERATIONS=5 -e NUM_SIMULATIONS=20 pixelpunk77/hexai-az:latest
 ```
 
 ---
@@ -226,3 +267,35 @@ del training\models\hex_az_best.pth
 **Training hangs on "Generating self-play data" (Windows)** → Windows uses the `spawn` multiprocessing start method. Multi-worker self-play may hang or crash. Use `num_workers: 1` in your config for local Windows runs. Multi-worker works correctly on Linux (cloud).
 
 **Training is very slow on CPU** → Expected. The default config does 800 MCTS sims × 100 games on CPU. For speed, use `hex11_test.yaml` for verification or `hex11_cloud.yaml` with GPU.
+
+---
+
+## Cloud Deployment (GCE + Docker)
+
+For full cloud deployment commands, persistent disk setup, GCS model storage, and troubleshooting, see **[docs/QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md)**.
+
+### Overview
+
+1. **Build and push** the Docker image after any code change:
+   ```powershell
+   docker build -t pixelpunk77/hexai-az:latest .
+   docker push pixelpunk77/hexai-az:latest
+   ```
+
+2. **Create a GCE instance** — the startup script (`startup-cpu.sh` or `startup-gpu.sh`) automatically installs Docker, pulls the image, and runs training.
+
+3. **Model upload** — after training completes, `entrypoint.sh` uploads `.pth` and `.onnx` files to GCS with timestamped filenames (e.g. `hex_az_best_20260322_201524.pth`).
+
+4. **Auto-shutdown** — a `trap on_exit EXIT` in both startup scripts guarantees the GCE instance stops itself on success or failure (30s delay for final metrics scrape).
+
+5. **Persistent disk** (`hexai-data`) — stores Docker layer cache and models at `/mnt/hexai/`. First pull takes ~40 mins; subsequent runs are near-instant.
+
+### Key files
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile` | Container image (PyTorch + gcloud CLI) |
+| `entrypoint.sh` | Container entrypoint: metrics server, training, GCS upload |
+| `startup-cpu.sh` | GCE startup: persistent disk, Docker install, CPU training |
+| `startup-gpu.sh` | GCE startup: NVIDIA toolkit, Docker install, GPU training |
+| `requirements-docker.txt` | Python deps for container (includes `google-cloud-storage`) |

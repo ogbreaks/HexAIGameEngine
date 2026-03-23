@@ -34,15 +34,18 @@ mount $DISK_DEV $MOUNT_POINT
 mkdir -p $MOUNT_POINT/docker
 mkdir -p $MOUNT_POINT/models
 
-# Configure Docker to use persistent disk for layers
+# Install Docker first so /etc/docker exists
+curl -fsSL https://get.docker.com | sh
+
+# NOW write daemon.json - directory exists
+mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<EOF
 {
   "data-root": "$MOUNT_POINT/docker"
 }
 EOF
 
-
-curl -fsSL https://get.docker.com | sh
+# Restart Docker to pick up new data-root
 systemctl restart docker
 docker pull pixelpunk77/hexai-az:latest
 docker run \
