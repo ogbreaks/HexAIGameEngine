@@ -46,15 +46,11 @@ cat > /etc/docker/daemon.json <<EOF
 }
 EOF
 
-# Redirect containerd root (Docker 29+ stores image layers here)
-systemctl stop containerd
-mkdir -p /etc/containerd
-containerd config default > /etc/containerd/config.toml
-sed -i 's|root = "/var/lib/containerd"|root = "'$MOUNT_POINT'/containerd"|' /etc/containerd/config.toml
-systemctl start containerd
-
-# Restart Docker to pick up new data-root
-systemctl restart docker
+# Redirect containerd root via symlink (Docker 29+ stores image layers here)
+systemctl stop containerd docker
+rm -rf /var/lib/containerd
+ln -s $MOUNT_POINT/containerd /var/lib/containerd
+systemctl start containerd docker
 docker pull pixelpunk77/hexai-az:latest
 docker run \
   -e HOURLY_RATE=${HOURLY_RATE:-0.19} \

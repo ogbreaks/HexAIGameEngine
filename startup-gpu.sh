@@ -55,14 +55,13 @@ cat > /etc/docker/daemon.json <<EOF
 }
 EOF
 
-# Redirect containerd root (Docker 29+ stores image layers here)
-systemctl stop containerd
-mkdir -p /etc/containerd
-containerd config default > /etc/containerd/config.toml
-sed -i 's|root = "/var/lib/containerd"|root = "'$MOUNT_POINT'/containerd"|' /etc/containerd/config.toml
-systemctl start containerd
+# Redirect containerd root via symlink (Docker 29+ stores image layers here)
+systemctl stop containerd docker
+rm -rf /var/lib/containerd
+ln -s $MOUNT_POINT/containerd /var/lib/containerd
+systemctl start containerd docker
 
-# Restart Docker to pick up new data-root + NVIDIA runtime
+# Restart Docker to pick up NVIDIA runtime
 systemctl restart docker
 
 # Now pull - layers go to persistent disk
