@@ -321,7 +321,8 @@ async function refresh() {
 
         // Loading message
         const msg = document.getElementById('loading-msg');
-        if (d.status === 'training' && (d.progress?.fps ?? 0) === 0) {
+        const hasPhase = d.phase && d.phase.name && d.phase.name !== 'init';
+        if (d.status === 'training' && (d.progress?.fps ?? 0) === 0 && !hasPhase) {
             msg.textContent = 'Loading data...';
             msg.style.color = '#666';
         } else if (d.status === 'complete') {
