@@ -106,8 +106,8 @@ def dashboard() -> HTMLResponse:
         /* Hardware bars */
         .bar-section { margin-top: 10px; }
         .bar-section label { display:block; color:#888; font-size:0.75em; margin-bottom:6px; }
-        .bar-row { display:flex; align-items:flex-end; gap:3px; height:40px; }
-        .cpu-col { flex:1; display:flex; flex-direction:column; align-items:center; }
+        .bar-row { display:flex; align-items:flex-end; gap:3px; flex-wrap:wrap; }
+        .cpu-col { flex:0 0 calc(12.5% - 3px); display:flex; flex-direction:column; align-items:center; height:56px; justify-content:flex-end; }
         .cpu-bar {
             width:100%; background:#3b82f6; border-radius:3px 3px 0 0;
             transition: height 0.4s ease; min-height:2px;
