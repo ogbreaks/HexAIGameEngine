@@ -99,6 +99,9 @@ class Coach:
         self._sub_total: int = 0
         self._sub_label: str = ""
 
+        # Event log (rolling buffer for dashboard console)
+        self._events: deque[dict] = deque(maxlen=30)
+
         # Cost tracking
         self._prior_session_hours: float = self._load_prior_hours()
         self._hourly_rate: float = float(os.environ.get("HOURLY_RATE", "0.0"))
@@ -107,6 +110,7 @@ class Coach:
         # Paths
         _training_dir = os.path.dirname(os.path.abspath(__file__))
         self._metrics_path = os.path.join(_training_dir, "metrics.json")
+        self._events_path = os.path.join(_training_dir, "events.json")
         self._cost_state_path = os.path.join(_training_dir, "cost_state.json")
         self._model_dir = config.get("model_dir", os.path.join(_training_dir, "models"))
         self._checkpoint_dir = config.get(
@@ -115,6 +119,21 @@ class Coach:
 
         os.makedirs(self._model_dir, exist_ok=True)
         os.makedirs(self._checkpoint_dir, exist_ok=True)
+
+    # ── Event log ───────────────────────────────────────────────────────────
+
+    def _log_event(self, msg: str) -> None:
+        """Append a timestamped event to the rolling log (dashboard console)."""
+        tz = timezone(timedelta(hours=self._tz_offset))
+        ts = datetime.now(tz).strftime("%H:%M")
+        self._events.append({"t": ts, "msg": msg})
+        try:
+            tmp = self._events_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(list(self._events), f)
+            os.replace(tmp, self._events_path)
+        except Exception:
+            pass  # Never let event logging interrupt training
 
     # ── Cost persistence ────────────────────────────────────────────────────
 
@@ -216,6 +235,9 @@ class Coach:
         )
 
         if win_rate > threshold:
+            self._log_event(
+                f"Arena: challenger {win_rate:.0%} vs champion \u2014 PROMOTED"
+            )
             print(
                 f"[Arena] Promoting challenger (win_rate={win_rate:.3f} > {threshold})"
             )
@@ -234,6 +256,10 @@ class Coach:
             # Save promoted best weights
             best_path = os.path.join(self._model_dir, "hex_az_best.pth")
             torch.save(self.network.state_dict(), best_path)
+        else:
+            self._log_event(
+                f"Arena: challenger {win_rate:.0%} vs champion \u2014 kept"
+            )
 
     def _save_checkpoint(self, tag: str) -> None:
         """Save full training checkpoint (network + optimiser + iteration)."""
@@ -402,6 +428,7 @@ class Coach:
             iter_start = time.time()
 
             print(f"\n[Coach] Iteration {i}/{num_iterations}")
+            self._log_event(f"Iteration {i}/{num_iterations} started")
 
             # 1. Self-play data generation
             total_games = num_workers * games_per_worker
@@ -440,6 +467,7 @@ class Coach:
 
             self._sub_done = total_games
             self._sub_label = f"{total_games}/{total_games} games"
+            self._log_event(f"Self-play complete \u2014 {total_games} games, buffer {len(self.replay_buffer):,}")
             print(f"[Coach] Buffer size: {len(self.replay_buffer)}")
 
             # 2. Train on buffer
@@ -452,6 +480,10 @@ class Coach:
                 self._write_metrics(status="training")
                 print("[Coach] Training network…")
                 self._train_epoch()
+                self._log_event(
+                    f"Training done \u2014 policy={self._last_policy_loss:.4f}, "
+                    f"value={self._last_value_loss:.4f}"
+                )
                 print(
                     f"[Coach] policy_loss={self._last_policy_loss:.4f}  "
                     f"value_loss={self._last_value_loss:.4f}"
@@ -489,9 +521,11 @@ class Coach:
                 self._sub_label = f"iter {i}"
                 self._write_metrics(status="training")
                 self._save_checkpoint(str(i))
+                self._log_event(f"Checkpoint saved (iter {i})")
                 print(f"[Coach] Checkpoint saved at iteration {i}")
 
             elapsed = time.time() - iter_start
+            self._log_event(f"Iteration {i} complete in {elapsed:.0f}s")
             print(f"[Coach] Iteration {i} complete in {elapsed:.1f}s")
 
         # Final save

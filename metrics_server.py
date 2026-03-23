@@ -19,6 +19,7 @@ app.add_middleware(
 # Resolve path relative to this file regardless of cwd
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 METRICS_PATH = os.path.join(_BASE_DIR, "training", "metrics.json")
+EVENTS_PATH = os.path.join(_BASE_DIR, "training", "events.json")
 
 # NVIDIA GPU monitoring — optional, graceful fallback if driver absent
 _gpu_available = False
@@ -148,6 +149,17 @@ def dashboard() -> HTMLResponse:
             transition:width 0.5s ease;
         }
         .sub-label { color:#888; font-size:0.8em; white-space:nowrap; }
+        /* Event log */
+        .log-card { grid-column: 1 / -1; }
+        .log-box {
+            background:#111; border-radius:8px; padding:12px;
+            max-height:220px; overflow-y:auto; font-family:'Cascadia Mono','Fira Code',monospace;
+            font-size:0.78em; line-height:1.6;
+        }
+        .log-box::-webkit-scrollbar { width:6px; }
+        .log-box::-webkit-scrollbar-thumb { background:#333; border-radius:3px; }
+        .log-ts { color:#555; margin-right:8px; }
+        .log-msg { color:#ccc; }
     </style>
 </head>
 <body>
@@ -273,7 +285,29 @@ def dashboard() -> HTMLResponse:
             </div>
         </div>
 
+        <div class="card log-card">
+            <h2>Event Log</h2>
+            <div class="log-box" id="log-box"><span style="color:#555">Waiting for events…</span></div>
+        </div>
+
     </div>
+
+<script>
+async function refreshEvents() {
+    try {
+        const r = await fetch('/events');
+        const events = await r.json();
+        const box = document.getElementById('log-box');
+        if (!events.length) return;
+        box.innerHTML = events.slice().reverse().map(e => {
+            const ts = e.ts ? e.ts.split('T')[1]?.slice(0,8) ?? '' : '';
+            return '<div><span class="log-ts">' + ts + '</span><span class="log-msg">' + (e.msg||'') + '</span></div>';
+        }).join('');
+    } catch(e) {}
+}
+refreshEvents();
+setInterval(refreshEvents, 10000);
+</script>
 
 <script>
 async function refreshHardware() {
@@ -427,6 +461,18 @@ setInterval(refresh, 10000);
 </html>
 """
     )
+
+
+@app.get("/events")
+def get_events() -> JSONResponse:
+    if not os.path.exists(EVENTS_PATH):
+        return JSONResponse([])
+    try:
+        with open(EVENTS_PATH, "r") as f:
+            data = json.load(f)
+        return JSONResponse(data)
+    except (json.JSONDecodeError, OSError):
+        return JSONResponse([])
 
 
 @app.get("/hardware")
