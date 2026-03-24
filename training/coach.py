@@ -257,9 +257,7 @@ class Coach:
             best_path = os.path.join(self._model_dir, "hex_az_best.pth")
             torch.save(self.network.state_dict(), best_path)
         else:
-            self._log_event(
-                f"Arena: challenger {win_rate:.0%} vs champion \u2014 kept"
-            )
+            self._log_event(f"Arena: challenger {win_rate:.0%} vs champion \u2014 kept")
 
     def _save_checkpoint(self, tag: str) -> None:
         """Save full training checkpoint (network + optimiser + iteration)."""
@@ -399,6 +397,7 @@ class Coach:
         use_inference_server = self.config.get("use_inference_server", False)
         inference_batch_size = self.config.get("inference_batch_size", 64)
         inference_max_wait_ms = self.config.get("inference_max_wait_ms", 5.0)
+        virtual_loss_k = self.config.get("virtual_loss_k", 1)
 
         print(f"[Coach] Starting training on {self.device}")
         print(f"[Coach] Iterations: {start_iteration} → {num_iterations}")
@@ -449,6 +448,7 @@ class Coach:
                 use_inference_server=use_inference_server,
                 inference_batch_size=inference_batch_size,
                 inference_max_wait_ms=inference_max_wait_ms,
+                virtual_loss_k=virtual_loss_k,
             )
             for game_data in data:
                 self.replay_buffer.add_game(game_data)
@@ -467,7 +467,9 @@ class Coach:
 
             self._sub_done = total_games
             self._sub_label = f"{total_games}/{total_games} games"
-            self._log_event(f"Self-play complete \u2014 {total_games} games, buffer {len(self.replay_buffer):,}")
+            self._log_event(
+                f"Self-play complete \u2014 {total_games} games, buffer {len(self.replay_buffer):,}"
+            )
             print(f"[Coach] Buffer size: {len(self.replay_buffer)}")
 
             # 2. Train on buffer

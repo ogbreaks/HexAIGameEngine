@@ -71,7 +71,7 @@ docker run --gpus all \
   -e TRAINING_CONFIG=${TRAINING_CONFIG:-config/hex11_t4.yaml} \
   -e GCS_BUCKET=${GCS_BUCKET:-hexai-models} \
   -e NUM_ITERATIONS=${NUM_ITERATIONS:-100} \
-  -e NUM_WORKERS=${NUM_WORKERS:-16} \
+  -e NUM_WORKERS=${NUM_WORKERS:-8} \
   -e NUM_SIMULATIONS=${NUM_SIMULATIONS:-200} \
   -p 8080:8080 \
   -v /mnt/hexai/models:/app/training/models \

@@ -49,6 +49,7 @@ def run_worker_with_server(
     queue: multiprocessing.Queue,
     request_queue: multiprocessing.Queue,
     result_queue: multiprocessing.Queue,
+    virtual_loss_k: int = 1,
 ) -> None:
     """
     Worker process using GPU inference server — no local network needed.
@@ -67,6 +68,7 @@ def run_worker_with_server(
         network=None,
         num_simulations=num_simulations,
         inference_client=client,
+        virtual_loss_k=virtual_loss_k,
     )
     for _ in range(num_games):
         game_data = play_one_game(mcts, temperature_threshold=temperature_threshold)

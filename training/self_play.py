@@ -129,6 +129,7 @@ def generate_self_play_data(
     use_inference_server: bool = False,
     inference_batch_size: int = 64,
     inference_max_wait_ms: float = 5.0,
+    virtual_loss_k: int = 1,
 ) -> list[list[tuple]]:
     """
     Spawn num_workers CPU processes; each plays games_per_worker games.
@@ -150,7 +151,9 @@ def generate_self_play_data(
 
     # Fast path: single worker — skip multiprocessing entirely, run in main process
     if num_workers == 1 and not use_inference_server:
-        mcts = MCTS(network, num_simulations=num_simulations)
+        mcts = MCTS(
+            network, num_simulations=num_simulations, virtual_loss_k=virtual_loss_k
+        )
         results: list[list[tuple]] = []
         for i in range(total_games):
             results.append(
@@ -187,6 +190,7 @@ def generate_self_play_data(
                     queue,
                     server.request_queue,
                     server.result_queues[worker_id],
+                    virtual_loss_k,
                 ),
             )
             p.start()

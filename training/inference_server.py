@@ -142,6 +142,23 @@ class InferenceClient:
         priors, value = self.result_queue.get()  # blocks
         return priors, value
 
+    def evaluate_batch(
+        self, state_vectors: list[list[float]]
+    ) -> list[tuple[np.ndarray, float]]:
+        """
+        Send K states to the inference server and collect all K results.
+
+        Each state is sent as an individual request so the server's existing
+        batching logic handles them naturally alongside other workers' requests.
+        """
+        for sv in state_vectors:
+            self.request_queue.put((self.worker_id, sv))
+        results = []
+        for _ in state_vectors:
+            priors, value = self.result_queue.get()
+            results.append((priors, value))
+        return results
+
 
 # ---------------------------------------------------------------------------
 # Server loop — runs in its own process with GPU access

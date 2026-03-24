@@ -125,6 +125,7 @@ class MCTS:
         dirichlet_alpha: float = 0.3,
         dirichlet_weight: float = 0.25,
         inference_client=None,
+        virtual_loss_k: int = 1,
     ) -> None:
         self.network = network
         self.num_simulations = num_simulations
@@ -133,6 +134,7 @@ class MCTS:
         self.dirichlet_weight = dirichlet_weight
         self._root: Optional[MCTSNode] = None
         self._inference_client = inference_client
+        self.virtual_loss_k = virtual_loss_k
 
     # ── Network evaluation ──────────────────────────────────────────────────
 
@@ -151,6 +153,20 @@ class MCTS:
             priors = torch.softmax(policy_logits, dim=-1).squeeze(0).cpu().numpy()
             v = float(value_t.squeeze().cpu().item())
         return priors, v
+
+    def _evaluate_batch(self, games: list[HexGame]) -> list[tuple[np.ndarray, float]]:
+        """Evaluate multiple positions in one batched call."""
+        state_vecs = [get_state_vector(g) for g in games]
+
+        if self._inference_client is not None:
+            return self._inference_client.evaluate_batch(state_vecs)
+
+        with torch.no_grad():
+            obs = torch.tensor(state_vecs, dtype=torch.float32)
+            policy_logits, value_t = self.network(obs)
+            priors = torch.softmax(policy_logits, dim=-1).cpu().numpy()
+            values = value_t.squeeze(-1).cpu().numpy()
+        return [(priors[i], float(values[i])) for i in range(len(games))]
 
     # ── Tree operations ─────────────────────────────────────────────────────
 
@@ -239,7 +255,13 @@ class MCTS:
         num_sims: int,
         dirichlet: bool = False,
     ) -> MCTSNode:
-        """Run num_sims simulations from game; return the root node."""
+        """Run num_sims simulations from game; return the root node.
+
+        When virtual_loss_k > 1, selects K leaves per batch using virtual loss
+        to force diverse paths, evaluates them in one GPU call, then expands
+        and backpropagates all K together.  This dramatically improves GPU
+        utilisation.
+        """
         root = MCTSNode(state=game)
         priors, _ = self._evaluate(game)
         self._expand(root, priors)
@@ -247,18 +269,37 @@ class MCTS:
         if dirichlet and root.children:
             self._add_dirichlet_noise(root)
 
-        for _ in range(num_sims):
-            leaf = self._select(root)
-            self._apply_virtual_loss(leaf)
+        k = self.virtual_loss_k
+        sim = 0
+        while sim < num_sims:
+            batch_k = min(k, num_sims - sim)
 
-            if leaf.state.is_terminal():
-                # get_current_player() at terminal = loser (HexGame flips player
-                # after the winning move). Value from loser's perspective = -1.0.
+            # Phase 1: select + virtual-loss K leaves
+            leaves: list[MCTSNode] = []
+            terminal_leaves: list[MCTSNode] = []
+            eval_leaves: list[MCTSNode] = []
+            for _ in range(batch_k):
+                leaf = self._select(root)
+                self._apply_virtual_loss(leaf)
+                leaves.append(leaf)
+                if leaf.state.is_terminal():
+                    terminal_leaves.append(leaf)
+                else:
+                    eval_leaves.append(leaf)
+
+            # Phase 2: handle terminals immediately
+            for leaf in terminal_leaves:
                 self._backpropagate(leaf, -1.0)
-            else:
-                priors, value = self._evaluate(leaf.state)
-                self._expand(leaf, priors)
-                self._backpropagate(leaf, value)
+
+            # Phase 3: batch-evaluate non-terminal leaves
+            if eval_leaves:
+                results = self._evaluate_batch([l.state for l in eval_leaves])
+                for leaf, (p, v) in zip(eval_leaves, results):
+                    if not leaf.is_expanded:
+                        self._expand(leaf, p)
+                    self._backpropagate(leaf, v)
+
+            sim += batch_k
 
         return root
 
