@@ -25,6 +25,9 @@ virtual_loss_k: 8            # batch 8 MCTS sims per GPU call
 num_workers: 8
 games_per_worker: 20       # 160 games/iter — same volume, fewer workers
 
+# ── Data Augmentation ─────────────────────────────────────────────────────────
+augment_symmetry: true    # 4× data via Hex board symmetries
+
 # ── GPU Inference Server ─────────────────────────────────────────────────────
 use_inference_server: true
 inference_batch_size: 64

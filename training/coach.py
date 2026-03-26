@@ -47,6 +47,7 @@ from training.self_play import generate_self_play_data
 from training.arena import Arena
 from training.players import MCTSPlayer
 from training.export import export_onnx
+from game.hex_symmetry import augment_game_data
 
 
 class Coach:
@@ -99,6 +100,12 @@ class Coach:
         self._sub_total: int = 0
         self._sub_label: str = ""
 
+        # ELO tracking
+        self._elo_k: float = config.get("elo_k_factor", 32)
+        self._elo_initial: float = config.get("elo_initial", 1000)
+        self._champion_elo: float = self._elo_initial
+        self._elo_history: list[dict] = [{"iter": 0, "elo": self._elo_initial}]
+
         # Event log (rolling buffer for dashboard console)
         self._events: deque[dict] = deque(maxlen=30)
 
@@ -112,6 +119,7 @@ class Coach:
         self._metrics_path = os.path.join(_training_dir, "metrics.json")
         self._events_path = os.path.join(_training_dir, "events.json")
         self._cost_state_path = os.path.join(_training_dir, "cost_state.json")
+        self._elo_state_path = os.path.join(_training_dir, "elo_state.json")
         self._model_dir = config.get("model_dir", os.path.join(_training_dir, "models"))
         self._checkpoint_dir = config.get(
             "checkpoint_dir", os.path.join(_training_dir, "checkpoints")
@@ -119,6 +127,9 @@ class Coach:
 
         os.makedirs(self._model_dir, exist_ok=True)
         os.makedirs(self._checkpoint_dir, exist_ok=True)
+
+        # Load persisted ELO state (survives restarts)
+        self._load_elo_state()
 
     # ── Event log ───────────────────────────────────────────────────────────
 
@@ -153,6 +164,63 @@ class Coach:
         with open(tmp, "w") as f:
             json.dump({"total_hours": total_hours}, f)
         os.replace(tmp, self._cost_state_path)
+
+    # ── ELO helpers ─────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _elo_expected(rating_a: float, rating_b: float) -> float:
+        """Expected score for player A against player B."""
+        return 1.0 / (1.0 + 10.0 ** ((rating_b - rating_a) / 400.0))
+
+    def _update_elo(self, win_rate: float) -> None:
+        """Update champion ELO after an arena evaluation.
+
+        Challenger's provisional rating equals the champion's current ELO
+        (unknown strength assumption). The match score is the observed
+        win_rate (0-1) of the challenger.
+        """
+        challenger_elo = self._champion_elo  # provisional
+        expected = self._elo_expected(challenger_elo, self._champion_elo)
+        # New rating for the challenger based on arena outcome
+        new_challenger_elo = challenger_elo + self._elo_k * (win_rate - expected)
+        # Champion rating adjusts inversely
+        new_champion_elo = self._champion_elo + self._elo_k * (
+            (1 - win_rate) - expected
+        )
+        # The network that survives (promoted or not) carries the updated rating
+        self._champion_elo = round(
+            (
+                new_challenger_elo
+                if win_rate > self.config.get("promotion_threshold", 0.55)
+                else new_champion_elo
+            ),
+            1,
+        )
+        self._elo_history.append({"iter": self.iteration, "elo": self._champion_elo})
+        self._save_elo_state()
+
+    def _load_elo_state(self) -> None:
+        """Load persisted ELO ratings from elo_state.json."""
+        try:
+            with open(self._elo_state_path) as f:
+                state = json.load(f)
+            self._champion_elo = float(state.get("champion_elo", self._elo_initial))
+            self._elo_history = state.get(
+                "history", [{"iter": 0, "elo": self._elo_initial}]
+            )
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            pass  # Keep defaults set in __init__
+
+    def _save_elo_state(self) -> None:
+        """Atomically persist ELO state."""
+        state = {
+            "champion_elo": self._champion_elo,
+            "history": self._elo_history,
+        }
+        tmp = self._elo_state_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, self._elo_state_path)
 
     # ── Win rate helper ─────────────────────────────────────────────────────
 
@@ -197,6 +265,7 @@ class Coach:
 
             self.optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), max_norm=1.0)
             self.optimizer.step()
 
             total_policy_loss += policy_loss.item()
@@ -214,24 +283,42 @@ class Coach:
         arena_sims = self.config.get("arena_simulations", 200)
         arena_games = self.config.get("arena_games", 40)
         threshold = self.config.get("promotion_threshold", 0.55)
+        arena_workers = self.config.get(
+            "arena_workers", self.config.get("num_workers", 4)
+        )
 
-        # Both players run on CPU
-        challenger_cpu = copy.deepcopy(self.network).to("cpu")
-        challenger_cpu.eval()
-
-        challenger = MCTSPlayer(challenger_cpu, num_simulations=arena_sims)
-        champion = MCTSPlayer(self.best_network, num_simulations=arena_sims)
-
-        arena = Arena(challenger, champion, num_games=arena_games)
-        p1_wins, p2_wins, _ = arena.play_games()
+        if arena_workers > 1:
+            # Parallel arena — distribute games across worker processes
+            challenger_cpu = copy.deepcopy(self.network).to("cpu")
+            challenger_cpu.eval()
+            p1_wins, p2_wins, _ = Arena.play_games_parallel(
+                net_config=self.config,
+                challenger_sd=challenger_cpu.state_dict(),
+                champion_sd=self.best_network.state_dict(),
+                num_sims=arena_sims,
+                num_games=arena_games,
+                num_workers=arena_workers,
+            )
+        else:
+            # Sequential arena — single process
+            challenger_cpu = copy.deepcopy(self.network).to("cpu")
+            challenger_cpu.eval()
+            challenger = MCTSPlayer(challenger_cpu, num_simulations=arena_sims)
+            champion = MCTSPlayer(self.best_network, num_simulations=arena_sims)
+            arena = Arena(challenger, champion, num_games=arena_games)
+            p1_wins, p2_wins, _ = arena.play_games()
 
         total = p1_wins + p2_wins
         win_rate = p1_wins / total if total > 0 else 0.0
         self._last_arena_win_rate = round(win_rate, 4)
 
+        # Update ELO before promotion decision (uses current champion rating)
+        self._update_elo(win_rate)
+
         print(
             f"[Arena] iter={self.iteration}  challenger={p1_wins}  "
-            f"champion={p2_wins}  win_rate={win_rate:.3f}"
+            f"champion={p2_wins}  win_rate={win_rate:.3f}  "
+            f"elo={self._champion_elo}"
         )
 
         if win_rate > threshold:
@@ -266,6 +353,7 @@ class Coach:
             {
                 "iteration": self.iteration,
                 "model_state_dict": self.network.state_dict(),
+                "best_model_state_dict": self.best_network.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "scheduler_state_dict": self.scheduler.state_dict(),
                 "config": self.config,
@@ -353,6 +441,8 @@ class Coach:
                 "network_promotions": self._promotion_count,
                 "buffer_size": len(self.replay_buffer),
                 "iteration": self.iteration,
+                "current_elo": self._champion_elo,
+                "elo_history": self._elo_history,
             },
             "phase": {
                 "name": self._phase,
@@ -452,6 +542,8 @@ class Coach:
             )
             for game_data in data:
                 self.replay_buffer.add_game(game_data)
+                if self.config.get("augment_symmetry", True):
+                    self.replay_buffer.add_game(augment_game_data(game_data))
 
                 # Track win/loss outcomes for rolling window
                 # Each game ends with a winner; the last entry's value_target reveals who won
@@ -553,6 +645,11 @@ class Coach:
         coach = cls(config)
         coach.network.load_state_dict(checkpoint["model_state_dict"])
         coach.network.to(coach.device)
+
+        # Restore champion (best_network) if saved; fallback to challenger copy
+        if "best_model_state_dict" in checkpoint:
+            coach.best_network.load_state_dict(checkpoint["best_model_state_dict"])
+
         coach.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         coach.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 

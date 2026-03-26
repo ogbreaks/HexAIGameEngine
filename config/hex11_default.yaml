@@ -23,6 +23,9 @@ temperature_threshold: 30  # moves before temperature drops from 1.0 to 0.01
 num_workers: 4          # parallel CPU processes for self-play
 games_per_worker: 25    # games per worker per iteration (100 total per iteration)
 
+# ── Data Augmentation ─────────────────────────────────────────────────────────
+augment_symmetry: true    # 4× data via Hex board symmetries (identity, 180°, diagonal, anti-diagonal)
+
 # ── Training ─────────────────────────────────────────────────────────────────
 num_iterations: 1000    # total training iterations (self-play + train cycles)
 train_steps_per_iter: 100  # gradient updates per iteration
@@ -41,6 +44,10 @@ promotion_threshold: 0.55     # win rate required to promote challenger to best
 checkpoint_freq: 50                       # save full checkpoint every N iterations
 model_dir: training/models                # best weights + ONNX exports
 checkpoint_dir: training/checkpoints      # full checkpoints (resume training)
+
+# ── ELO Rating ────────────────────────────────────────────────────────────────
+elo_k_factor: 32              # sensitivity per arena result (16=stable, 64=reactive)
+elo_initial: 1000             # starting rating for untrained network
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 level: az               # written to metrics.json for dashboard display

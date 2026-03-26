@@ -135,6 +135,13 @@ def dashboard() -> HTMLResponse:
         .phase-checkpoint  { background:#4338ca; color:#c7d2fe; }
         .phase-idle       { background:#333;    color:#888; }
         .phase-init       { background:#333;    color:#888; }
+        /* ELO sparkline */
+        .elo-row { display:flex; align-items:center; gap:10px; margin-top:4px; }
+        .elo-delta { font-size:0.8em; font-weight:600; }
+        .elo-delta.up   { color:#4ade80; }
+        .elo-delta.down { color:#f87171; }
+        .elo-delta.flat { color:#666; }
+        .sparkline-wrap { height:32px; flex:1; }
         /* Sub-progress mini bar */
         .sub-progress-wrap {
             margin-top:8px; display:flex; align-items:center; gap:10px;
@@ -239,6 +246,14 @@ def dashboard() -> HTMLResponse:
         <div class="card">
             <h2>Training Quality</h2>
             <div class="metric">
+                <span class="label">Network ELO</span>
+                <span class="value highlight" id="elo-value">&#8212;</span>
+            </div>
+            <div class="elo-row">
+                <span class="elo-delta flat" id="elo-delta"></span>
+                <div class="sparkline-wrap" id="elo-sparkline"></div>
+            </div>
+            <div class="metric" style="margin-top:10px;">
                 <span class="label">Win rate (last 200)</span>
                 <span class="value highlight" id="win-rate">&#8212;</span>
             </div>
@@ -432,6 +447,44 @@ async function refresh() {
             ? '$' + d.cost.cost_estimate_total.toFixed(4) : '\u2014';
 
         // Training quality
+        // ELO
+        const elo = d.training?.current_elo;
+        const eloHist = d.training?.elo_history ?? [];
+        document.getElementById('elo-value').textContent =
+            elo != null ? Math.round(elo) : '\u2014';
+        // Delta badge
+        const deltaEl = document.getElementById('elo-delta');
+        if (eloHist.length >= 2) {
+            const prev = eloHist[eloHist.length - 2].elo;
+            const diff = Math.round(elo - prev);
+            const sign = diff > 0 ? '+' : '';
+            deltaEl.textContent = sign + diff;
+            deltaEl.className = 'elo-delta ' + (diff > 0 ? 'up' : diff < 0 ? 'down' : 'flat');
+        } else {
+            deltaEl.textContent = '';
+            deltaEl.className = 'elo-delta flat';
+        }
+        // Sparkline SVG
+        const sparkWrap = document.getElementById('elo-sparkline');
+        if (eloHist.length >= 2) {
+            const w = sparkWrap.clientWidth || 120;
+            const h = 32;
+            const vals = eloHist.map(e => e.elo);
+            const mn = Math.min(...vals) - 10;
+            const mx = Math.max(...vals) + 10;
+            const range = mx - mn || 1;
+            const pts = vals.map((v, i) =>
+                (i / (vals.length - 1) * (w - 4) + 2).toFixed(1) + ',' +
+                (h - 2 - (v - mn) / range * (h - 4)).toFixed(1)
+            ).join(' ');
+            sparkWrap.innerHTML =
+                '<svg width="' + w + '" height="' + h + '">' +
+                '<polyline points="' + pts + '" fill="none" stroke="#4ade80" stroke-width="1.5" />' +
+                '</svg>';
+        } else {
+            sparkWrap.innerHTML = '';
+        }
+
         const wr = d.training?.win_rate_last_200;
         document.getElementById('win-rate').textContent =
             wr != null ? (wr * 100).toFixed(1) + '%' : '\u2014';

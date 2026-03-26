@@ -12,6 +12,7 @@ This removes first-player advantage bias from the win-rate measurement.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import sys
 
@@ -20,6 +21,71 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from game.hex_game import HexGame
+
+
+# ── Worker function (top-level for pickling) ─────────────────────────────────
+
+
+def _arena_worker(
+    net_config: dict,
+    challenger_sd: dict,
+    champion_sd: dict,
+    num_sims: int,
+    games_as_p1: int,
+    games_as_p2: int,
+    result_queue: multiprocessing.Queue,
+) -> None:
+    """Play a slice of arena games in a subprocess and report results."""
+    import numpy as np
+
+    from training.mcts import MCTS
+    from training.policy_value_network import PolicyValueNetwork
+
+    # Reconstruct networks from state dicts (CPU only)
+    challenger_net = PolicyValueNetwork(net_config)
+    challenger_net.load_state_dict(challenger_sd)
+    challenger_net.eval()
+
+    champion_net = PolicyValueNetwork(net_config)
+    champion_net.load_state_dict(champion_sd)
+    champion_net.eval()
+
+    challenger_mcts = MCTS(challenger_net, num_simulations=num_sims)
+    champion_mcts = MCTS(champion_net, num_simulations=num_sims)
+
+    p1_wins = 0
+    p2_wins = 0
+
+    # Games where challenger moves first
+    for _ in range(games_as_p1):
+        w = _play_one_game(challenger_mcts, champion_mcts, np)
+        if w == 1:
+            p1_wins += 1
+        else:
+            p2_wins += 1
+
+    # Games where challenger moves second
+    for _ in range(games_as_p2):
+        w = _play_one_game(champion_mcts, challenger_mcts, np)
+        if w == 1:
+            p2_wins += 1  # first mover (champion) won
+        else:
+            p1_wins += 1
+
+    result_queue.put((p1_wins, p2_wins))
+
+
+def _play_one_game(first_mcts, second_mcts, np) -> int:
+    """Play one game between two MCTS instances. Returns 1 or 2."""
+    game = HexGame()
+    mcts_map = {1: first_mcts, 2: second_mcts}
+
+    while not game.is_terminal():
+        cur = game.get_current_player()
+        policy = mcts_map[cur].get_policy(game, temperature=0.01, is_self_play=False)
+        game = game.apply_action(int(np.argmax(policy)))
+
+    return game.get_winner()
 
 
 class Arena:
@@ -65,6 +131,73 @@ class Arena:
                 p1_wins += 1
 
         return p1_wins, p2_wins, 0
+
+    @staticmethod
+    def play_games_parallel(
+        net_config: dict,
+        challenger_sd: dict,
+        champion_sd: dict,
+        num_sims: int,
+        num_games: int = 40,
+        num_workers: int = 4,
+    ) -> tuple[int, int, int]:
+        """
+        Parallel arena: distribute games across worker processes.
+
+        Parameters
+        ----------
+        net_config : dict   — network architecture config (trunk, channels, etc.)
+        challenger_sd : dict — challenger network state_dict
+        champion_sd : dict  — champion network state_dict
+        num_sims : int      — MCTS simulations per move
+        num_games : int     — total games to play
+        num_workers : int   — number of worker processes
+
+        Returns (p1_wins, p2_wins, 0)
+        """
+        half = num_games // 2
+        remainder = num_games - half
+
+        # Distribute p1-first and p2-first games evenly across workers
+        p1_per_worker = [half // num_workers] * num_workers
+        p2_per_worker = [remainder // num_workers] * num_workers
+        for i in range(half % num_workers):
+            p1_per_worker[i] += 1
+        for i in range(remainder % num_workers):
+            p2_per_worker[i] += 1
+
+        ctx = multiprocessing.get_context("spawn")
+        result_queue = ctx.Queue()
+
+        processes = []
+        for w in range(num_workers):
+            p = ctx.Process(
+                target=_arena_worker,
+                args=(
+                    net_config,
+                    challenger_sd,
+                    champion_sd,
+                    num_sims,
+                    p1_per_worker[w],
+                    p2_per_worker[w],
+                    result_queue,
+                ),
+            )
+            p.start()
+            processes.append(p)
+
+        # Collect results
+        total_p1 = 0
+        total_p2 = 0
+        for _ in range(num_workers):
+            p1w, p2w = result_queue.get(timeout=600)
+            total_p1 += p1w
+            total_p2 += p2w
+
+        for p in processes:
+            p.join(timeout=30)
+
+        return total_p1, total_p2, 0
 
     @staticmethod
     def _play_one(first, second) -> int:

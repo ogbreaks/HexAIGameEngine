@@ -13,6 +13,7 @@ temperature_threshold: 30
 
 num_workers: 1
 games_per_worker: 4
+augment_symmetry: false   # skip augmentation for fast test runs
 
 num_iterations: 20
 train_steps_per_iter: 10

@@ -105,6 +105,7 @@ Runs on `localhost:5000`. Endpoints: `/state`, `/move`, `/reset`, `/mcts_move`.
 | `hex11_micro.yaml` | Minimal 10-iteration test | 4 blocks, 64ch | 2 | 10 |
 | `hex11_test.yaml` | Quick sanity check | 4 blocks, 64ch | 4 | 20 |
 | `hex11_default.yaml` | Standard training | 10 blocks, 128ch | 100 | 1000 |
+| `hex11_t4.yaml` | GCE T4 GPU (~2 hrs) | 10 blocks, 128ch | 160 | 100 |
 | `hex11_cloud.yaml` | Scaled cloud run | 20 blocks, 256ch | 800 | 5000 |
 
 ### Key Config Parameters
@@ -118,6 +119,7 @@ Runs on `localhost:5000`. Endpoints: `/state`, `/move`, `/reset`, `/mcts_move`.
 - `num_simulations`: search depth per move (default: 800)
 - `c_puct`: exploration constant (default: 1.4)
 - `dirichlet_alpha` / `dirichlet_weight`: root noise for exploration
+- `virtual_loss_k`: MCTS sims batched per GPU call (default: 1; T4 config: 8)
 
 **Self-play:**
 - `num_workers`: CPU processes (default: 4)
@@ -137,11 +139,19 @@ Runs on `localhost:5000`. Endpoints: `/state`, `/move`, `/reset`, `/mcts_move`.
 - `inference_batch_size`: states per GPU forward pass (default: 64)
 - `inference_max_wait_ms`: max wait before flushing a partial batch (default: 5)
 
+**Data Augmentation:**
+- `augment_symmetry`: `true` to apply Hex board symmetries for 4× training data (default: true). The symmetry group consists of 180° rotation, diagonal transpose, and anti-diagonal transpose — each with appropriate colour swap.
+
 **Arena:**
 - `arena_freq`: evaluate every N iterations (default: 10)
 - `arena_games`: games per evaluation (default: 40, split 50/50 first-mover)
 - `arena_simulations`: MCTS sims during arena (default: 200)
 - `promotion_threshold`: win rate to promote challenger (default: 0.55)
+- `arena_workers`: parallel processes for arena games (default: same as `num_workers`; set to 1 for sequential)
+
+**ELO Rating:**
+
+ELO is tracked automatically — no config needed. After each arena evaluation the champion's ELO is updated using the expected-score formula (K=32, base=1000). ELO state persists in `training/elo_state.json` and is displayed on the dashboard.
 
 **Checkpointing:**
 - `checkpoint_freq`: save every N iterations (default: 50)
@@ -238,6 +248,8 @@ Open `http://localhost:8000/dashboard` in your browser — auto-refreshes every 
 | `training/checkpoints/hex_az_final.pth` | Checkpoint at training completion |
 | `training/metrics.json` | Current training metrics (for dashboard) |
 | `training/cost_state.json` | Accumulated training hours (persists across restarts) |
+| `training/elo_state.json` | Champion ELO rating (persists across restarts) |
+| `training/events.json` | Timestamped event log (promotions, arena results, errors) |
 
 ---
 
@@ -245,10 +257,11 @@ Open `http://localhost:8000/dashboard` in your browser — auto-refreshes every 
 
 Each iteration:
 1. **Self-play** — Workers play MCTS games, producing (state, policy, value) training data
-2. **Train** — Sample from replay buffer, update network via policy + value loss
-3. **Arena** (every N iters) — Challenger vs champion; promote if win rate > 55%
-4. **Checkpoint** (every M iters) — Save full training state for resume
-5. **Metrics** — Write progress to JSON for dashboard
+2. **Augment** — If `augment_symmetry: true`, generate 3 additional copies per game via board symmetries (4× total data)
+3. **Train** — Sample from replay buffer, update network via policy + value loss (gradient clipping at max_norm=1.0)
+4. **Arena** (every N iters) — Challenger vs champion (parallel if `arena_workers > 1`); promote if win rate > 55%; update ELO
+5. **Checkpoint** (every M iters) — Save full training state (challenger + champion networks) for resume
+6. **Metrics** — Write progress to JSON for dashboard
 
 ---
 
