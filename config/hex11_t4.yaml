@@ -1,4 +1,4 @@
-# hex11_t4.yaml — AlphaZero 11×11 Hex tuned for GCE n1-standard-16 + T4
+# hex11_t4.yaml — AlphaZero 11×11 Hex tuned for GCE n1-standard-8 + T4
 # Target: strong, competent AI in ~2 hours (~$1 SPOT).
 # 10×128 ResNet is proven for Hex — fast inference, strong convergence.
 
@@ -22,8 +22,8 @@ temperature_threshold: 30
 virtual_loss_k: 8            # batch 8 MCTS sims per GPU call
 
 # ── Self-play ─────────────────────────────────────────────────────────────────
-num_workers: 8
-games_per_worker: 20       # 160 games/iter — same volume, fewer workers
+num_workers: 12
+games_per_worker: 14       # 168 games/iter — more workers to saturate T4
 
 # ── Data Augmentation ─────────────────────────────────────────────────────────
 augment_symmetry: true    # 4× data via Hex board symmetries
