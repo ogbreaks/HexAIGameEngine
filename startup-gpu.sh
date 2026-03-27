@@ -34,6 +34,15 @@ mount $DISK_DEV $MOUNT_POINT
 mkdir -p $MOUNT_POINT/docker
 mkdir -p $MOUNT_POINT/containerd
 mkdir -p $MOUNT_POINT/models
+mkdir -p $MOUNT_POINT/checkpoints
+
+# Smart cleanup: fresh run clears stale models; resume keeps them
+if [ -z "${RESUME_CHECKPOINT}" ]; then
+  echo "Fresh run — clearing stale models from previous training"
+  rm -f $MOUNT_POINT/models/*.pth
+else
+  echo "Resume run — keeping existing models"
+fi
 
 # Install Docker first so /etc/docker exists
 curl -fsSL https://get.docker.com | sh
@@ -87,6 +96,8 @@ docker run --gpus all \
   -e NUM_ITERATIONS=${NUM_ITERATIONS:-100} \
   -e NUM_WORKERS=${NUM_WORKERS:-8} \
   -e NUM_SIMULATIONS=${NUM_SIMULATIONS:-200} \
+  -e RESUME_CHECKPOINT=${RESUME_CHECKPOINT:-} \
   -p 8080:8080 \
   -v /mnt/hexai/models:/app/training/models \
+  -v /mnt/hexai/checkpoints:/app/training/checkpoints \
   pixelpunk77/hexai-az:latest

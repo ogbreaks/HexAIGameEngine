@@ -28,7 +28,12 @@ uvicorn metrics_server:app --host 0.0.0.0 --port 8080 &
 METRICS_PID=$!
 
 # Run training in foreground
-python main.py --mode train_az --config ${TRAINING_CONFIG:-config/hex11_cloud.yaml}
+if [ -n "${RESUME_CHECKPOINT}" ]; then
+  echo "Resuming from checkpoint: ${RESUME_CHECKPOINT}"
+  python main.py --mode train_az --config ${TRAINING_CONFIG:-config/hex11_cloud.yaml} --resume "${RESUME_CHECKPOINT}"
+else
+  python main.py --mode train_az --config ${TRAINING_CONFIG:-config/hex11_cloud.yaml}
+fi
 TRAINING_EXIT=$?
 
 # Write completion marker
