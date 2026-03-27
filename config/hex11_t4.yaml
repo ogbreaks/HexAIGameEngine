@@ -46,6 +46,7 @@ buffer_size: 200000
 arena_freq: 10
 arena_games: 40
 arena_simulations: 200
+arena_workers: 4          # limit CPU processes during arena (default = num_workers)
 promotion_threshold: 0.55
 
 # ── Checkpointing ────────────────────────────────────────────────────────────

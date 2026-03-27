@@ -130,6 +130,7 @@ def generate_self_play_data(
     inference_batch_size: int = 64,
     inference_max_wait_ms: float = 5.0,
     virtual_loss_k: int = 1,
+    net_config: dict | None = None,
 ) -> list[list[tuple]]:
     """
     Spawn num_workers CPU processes; each plays games_per_worker games.
@@ -167,8 +168,13 @@ def generate_self_play_data(
         from training.inference_server import InferenceServer
         from training.worker import run_worker_with_server
 
+        # Extract CPU state dict — safe to pickle across spawn boundary.
+        # Passing a live CUDA model to a spawned process causes unpickling
+        # to fail because CUDA is not yet initialised in the child process.
+        cpu_state_dict = {k: v.cpu() for k, v in network.state_dict().items()}
         server = InferenceServer(
-            network=copy.deepcopy(network),
+            net_config=net_config or {},
+            state_dict=cpu_state_dict,
             num_workers=num_workers,
             batch_size=inference_batch_size,
             max_wait_ms=inference_max_wait_ms,

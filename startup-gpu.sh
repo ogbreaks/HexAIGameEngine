@@ -65,6 +65,20 @@ systemctl start containerd docker
 systemctl restart docker
 
 docker pull pixelpunk77/hexai-az:latest
+
+# ── GPU smoke test — runs in ~5s, aborts before wasting money if GPU is broken ──
+echo "=== Running GPU inference server smoke test ==="
+docker run --gpus all --rm \
+  pixelpunk77/hexai-az:latest \
+  python test_inference_server_gpu.py
+
+SMOKE_EXIT=$?
+if [ $SMOKE_EXIT -ne 0 ]; then
+  echo "SMOKE TEST FAILED (exit $SMOKE_EXIT) — aborting. Check logs above for [FAIL] lines."
+  exit 1
+fi
+echo "=== Smoke test passed — starting training ==="
+
 docker run --gpus all \
   -e HOURLY_RATE=${HOURLY_RATE:-0.50} \
   -e TIMEZONE_OFFSET=${TIMEZONE_OFFSET:-1} \

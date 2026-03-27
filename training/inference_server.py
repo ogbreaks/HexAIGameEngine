@@ -60,13 +60,16 @@ class InferenceServer:
 
     def __init__(
         self,
-        network,
+        net_config: dict,
+        state_dict: dict,
         num_workers: int,
         batch_size: int = 64,
         max_wait_ms: float = 5.0,
         device: str | None = None,
     ) -> None:
-        self.network = network
+        self.net_config = net_config
+        # Ensure state dict is on CPU so it can be safely pickled for spawn
+        self.state_dict = {k: v.cpu() for k, v in state_dict.items()}
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.max_wait_ms = max_wait_ms
@@ -92,7 +95,8 @@ class InferenceServer:
         self._process = ctx.Process(
             target=_server_loop,
             args=(
-                self.network,
+                self.net_config,
+                self.state_dict,
                 self.request_queue,
                 self.result_queues,
                 self.batch_size,
@@ -103,6 +107,16 @@ class InferenceServer:
             daemon=True,
         )
         self._process.start()
+        # Give the server a moment to start and verify it's alive
+        import time
+
+        time.sleep(2)
+        if not self._process.is_alive():
+            raise RuntimeError(
+                f"[InferenceServer] Server process died on startup "
+                f"(exit code {self._process.exitcode}). "
+                f"Check for CUDA errors in the logs."
+            )
 
     def stop(self) -> None:
         """Signal shutdown and join."""
@@ -166,7 +180,8 @@ class InferenceClient:
 
 
 def _server_loop(
-    network,
+    net_config: dict,
+    state_dict: dict,
     request_queue: multiprocessing.Queue,
     result_queues: list[multiprocessing.Queue],
     batch_size: int,
@@ -178,8 +193,21 @@ def _server_loop(
     Main inference server loop. Collects requests, batches them, runs GPU forward
     passes, and dispatches results to per-worker queues.
     """
-    network = network.to(device)
-    network.eval()
+    import sys
+    from training.policy_value_network import PolicyValueNetwork
+
+    print(f"[InferenceServer] Starting on {device}", flush=True)
+    try:
+        network = PolicyValueNetwork(net_config)
+        network.load_state_dict(state_dict)
+        network = network.to(device)
+        network.eval()
+        print(f"[InferenceServer] Network ready on {device}", flush=True)
+    except Exception as exc:
+        print(
+            f"[InferenceServer] FATAL: failed to initialise network: {exc}", flush=True
+        )
+        sys.exit(1)
 
     max_wait_sec = max_wait_ms / 1000.0
 

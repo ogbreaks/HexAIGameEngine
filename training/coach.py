@@ -539,6 +539,7 @@ class Coach:
                 inference_batch_size=inference_batch_size,
                 inference_max_wait_ms=inference_max_wait_ms,
                 virtual_loss_k=virtual_loss_k,
+                net_config=self.config,
             )
             for game_data in data:
                 self.replay_buffer.add_game(game_data)
