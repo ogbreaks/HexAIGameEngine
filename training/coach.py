@@ -131,6 +131,9 @@ class Coach:
         # Load persisted ELO state (survives restarts)
         self._load_elo_state()
 
+        # ── Startup system checks → first dashboard events ───────────────────
+        self._log_startup_checks()
+
     # ── Event log ───────────────────────────────────────────────────────────
 
     def _log_event(self, msg: str) -> None:
@@ -145,6 +148,42 @@ class Coach:
             os.replace(tmp, self._events_path)
         except Exception:
             pass  # Never let event logging interrupt training
+
+    def _log_startup_checks(self) -> None:
+        """Log GPU/system info as the first dashboard events on startup."""
+        # GPU / CUDA
+        if torch.cuda.is_available():
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_mem = torch.cuda.get_device_properties(0).total_memory // (1024**2)
+            self._log_event(f"GPU: {gpu_name} ({gpu_mem} MiB) \u2014 CUDA OK")
+        else:
+            self._log_event("GPU: NOT AVAILABLE \u2014 training on CPU")
+
+        # Inference server
+        use_inf = self.config.get("use_inference_server", False)
+        batch = self.config.get("inference_batch_size", 64)
+        self._log_event(
+            f"Inference server: {'ENABLED (batch=' + str(batch) + ')' if use_inf else 'DISABLED (CPU inference)'}"
+        )
+
+        # Config summary
+        workers = self.config.get("num_workers", 4)
+        sims = self.config.get("num_simulations", 200)
+        blocks = self.config.get("num_res_blocks", 10)
+        channels = self.config.get("num_channels", 128)
+        self._log_event(
+            f"Config: {blocks}\u00d7{channels} ResNet, {workers} workers, {sims} sims"
+        )
+
+        # Note any env var overrides
+        for env_key, cfg_key in [
+            ("NUM_WORKERS", "num_workers"),
+            ("NUM_SIMULATIONS", "num_simulations"),
+            ("NUM_ITERATIONS", "num_iterations"),
+        ]:
+            val = os.environ.get(env_key)
+            if val is not None:
+                self._log_event(f"Env override: {cfg_key} = {val}")
 
     # ── Cost persistence ────────────────────────────────────────────────────
 
